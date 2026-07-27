@@ -1,23 +1,6 @@
 ---
 description: Uses Kimi K3 to implement an approved plan and make existing requirement tests pass.
-mode: subagent
 model: kimi/k3
-temperature: 0.1
-steps: 50
-permission:
-  edit: allow
-  bash:
-    "*": allow
-    "git push*": deny
-    "git reset --hard*": deny
-    "git clean*": deny
-    "rm -rf*": deny
-  task: deny
-  webfetch: deny
-  websearch: deny
-  skill:
-    "*": deny
-    "implement-change": allow
 ---
 
 Load `implement-change` before editing. Implement only the handed-off scope and acceptance criteria.

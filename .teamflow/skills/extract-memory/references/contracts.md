@@ -74,6 +74,7 @@ Output: `30-candidates.json`.
       "subject": "concept-id",
       "predicate": null,
       "object": null,
+      "content": "...",
       "statement": "...",
       "scope": "repository|cross-project",
       "status": "verified|hypothesis|disputed",
@@ -114,6 +115,8 @@ concept's upstream compression claim IDs into candidate `derived_from`; claim li
 is already carried by the extraction artifact. For a non-concept candidate,
 `derived_from` must contain the corresponding extraction fact, decision, relation,
 procedure, or problem ID.
+
+Every `create`, `update`, or `supersede` candidate must carry canonical semantic text. The deterministic runner resolves candidate semantic text with this precedence: non-empty `content` first (canonical), then a non-empty legacy `statement`, then a complete `subject`+`predicate`+`object` triple (all three must be non-empty strings). A bare `subject` or an incomplete triple is invalid — the runner rejects such candidates even when `subject`, `title`, and `action_reason` are present. Prefer `content` for concept and fact candidates; use a complete triple for relation candidates; `statement` is retained only for backward compatibility. `skip` candidates are exempt because they reference existing notes rather than carrying new semantic text.
 
 Every concept referenced by a fact, decision, relation, or procedure must have a corresponding concept candidate, even when that candidate's action is `skip` because an equivalent concept already exists.
 

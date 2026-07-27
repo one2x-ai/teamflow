@@ -3,8 +3,8 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
-TEAMFLOW_HOME="${TEAMFLOW_HOME:-${WORKFLOW_HOME:-$HOME/.teamflow}}"
-MEMORY_ROOT="${TEAMFLOW_MEMORY_HOME:-${WORKFLOW_MEMORY_HOME:-${OPENCODE_WORKFLOW_MEMORY_HOME:-$TEAMFLOW_HOME/memory}}}"
+TEAMFLOW_HOME="${TEAMFLOW_HOME:-$HOME/.teamflow}"
+MEMORY_ROOT="${TEAMFLOW_MEMORY_HOME:-$TEAMFLOW_HOME/memory}"
 export BASIC_MEMORY_AUTO_UPDATE=false
 export BASIC_MEMORY_CONFIG_DIR="$MEMORY_ROOT/state"
 export BASIC_MEMORY_HOME="$MEMORY_ROOT/knowledge"
@@ -12,9 +12,9 @@ export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=false
 
 ERRORS=0
 DOCTOR_HOME="${TMPDIR:-/tmp}/agent-teamflow-doctor"
-MIN_OPENCODE_VERSION="1.18.4"
+MIN_PI_VERSION="0.82.1"
 MIN_BASIC_MEMORY_VERSION="0.22.1"
-MEMORY_PROJECT_NAME="${TEAMFLOW_MEMORY_PROJECT:-${WORKFLOW_MEMORY_PROJECT:-${BASIC_MEMORY_PROJECT:-teamflow}}}"
+MEMORY_PROJECT_NAME="${TEAMFLOW_MEMORY_PROJECT:-${BASIC_MEMORY_PROJECT:-teamflow}}"
 mkdir -p "$DOCTOR_HOME"
 
 pass() {
@@ -43,8 +43,8 @@ else
   fail "node is not installed"
 fi
 
-if command -v opencode >/dev/null 2>&1; then
-  OPENCODE_VERSION="$(opencode --version)"
+if command -v pi >/dev/null 2>&1; then
+  PI_VERSION="$(pi --version)"
   if node -e '
     const parse = (value) => value.split(".").map(Number);
     const current = parse(process.argv[1]);
@@ -55,13 +55,13 @@ if command -v opencode >/dev/null 2>&1; then
       current[index] > minimum[index]
     );
     process.exit(valid ? 0 : 1);
-  ' "$OPENCODE_VERSION" "$MIN_OPENCODE_VERSION"; then
-    pass "opencode $OPENCODE_VERSION"
+  ' "$PI_VERSION" "$MIN_PI_VERSION"; then
+    pass "pi $PI_VERSION"
   else
-    fail "OpenCode $MIN_OPENCODE_VERSION+ is required; found $OPENCODE_VERSION"
+    fail "Pi $MIN_PI_VERSION+ is required; found $PI_VERSION"
   fi
 else
-  fail "opencode is not installed; run ./scripts/bootstrap.sh"
+  fail "pi is not installed; run ./scripts/bootstrap.sh"
 fi
 
 if command -v basic-memory >/dev/null 2>&1; then
@@ -101,10 +101,10 @@ else
   fail "basic-memory is not installed; run ./scripts/bootstrap.sh"
 fi
 
-if node -e 'JSON.parse(require("fs").readFileSync(".teamflow/config.json", "utf8"))' >/dev/null 2>&1; then
-  pass "teamflow configuration is valid JSON"
+if node -e 'JSON.parse(require("fs").readFileSync(".teamflow/models.json", "utf8"))' >/dev/null 2>&1; then
+  pass "pi models configuration is valid JSON"
 else
-  fail ".teamflow/config.json is not valid JSON"
+  fail ".teamflow/models.json is not valid JSON"
 fi
 
 if python3 .teamflow/skills/implement-change/scripts/source_safety.py --self-test >/dev/null && \
@@ -165,7 +165,7 @@ else
   fail "DEEPSEEK_API_KEY is empty"
 fi
 
-for runtime_command in teamflow memory memory-capture test-patch; do
+for runtime_command in teamflow memory memory-capture test-patch server; do
   if [[ -x ".teamflow/bin/$runtime_command" ]]; then
     pass "runtime command $runtime_command is executable"
   else
@@ -180,6 +180,12 @@ for experiment_command in memory-experiment memory-compare; do
     fail "experimental command $experiment_command is missing or not executable"
   fi
 done
+
+if [[ -f ".teamflow/extensions/teamflow-task/index.ts" ]]; then
+  pass "task role-launcher extension is installed"
+else
+  fail "task role-launcher extension .teamflow/extensions/teamflow-task/index.ts is missing"
+fi
 
 for agent in planner command coder test-writer test-runner emotional-salience-sensor memory-compressor memory-extractor memory-formatter; do
   if HOME="$DOCTOR_HOME" ./.teamflow/bin/teamflow debug agent "$agent" >/dev/null 2>&1; then

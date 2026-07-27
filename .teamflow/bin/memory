@@ -12,6 +12,10 @@ usage() {
   cat <<'EOF'
 Usage:
   teamflow memory recall <query>
+    Defaults to this repository's namespace (projects/<slug>/*) plus global/*
+    filtered locally from paged unscoped search, preserving upstream ranking
+    with permalink dedupe. Set TEAMFLOW_MEMORY_RECALL_SCOPE=all to opt into
+    a single unscoped all-memory search.
   teamflow memory remember <verified project finding>
   teamflow memory remember-global <verified reusable finding>
   teamflow memory read <memory-url-or-permalink>
@@ -74,8 +78,82 @@ write_finding() {
 case "$ACTION" in
   recall)
     require_text "$@"
-    basic-memory tool search-notes "$*" \
-      --page-size 8 --project "$PROJECT_NAME" --local
+    if [[ "${TEAMFLOW_MEMORY_RECALL_SCOPE:-repository}" == "all" ]]; then
+      basic-memory tool search-notes "$*" \
+        --page-size 8 --project "$PROJECT_NAME" --local
+    else
+      # Default scope: paginate unscoped text search (never --permalink, which
+      # is a boolean flag in real basic-memory), then filter + dedupe locally.
+      pages_dir="$(mktemp -d "${TMPDIR:-/tmp}/teamflow-recall.XXXXXX")"
+      trap 'rm -rf "$pages_dir"' EXIT
+      page=1
+      max_pages=1000
+      while (( page <= max_pages )); do
+        out="$(basic-memory tool search-notes "$*" \
+          --page "$page" --page-size 8 --project "$PROJECT_NAME" --local)" || out=""
+        printf '%s' "$out" > "${pages_dir}/${page}.json"
+        advance="$(RECALL_PAGE_FILE="${pages_dir}/${page}.json" python3 - <<'PY' || printf 'no'
+import json
+import os
+
+try:
+    with open(os.environ["RECALL_PAGE_FILE"], encoding="utf-8") as handle:
+        data = json.load(handle)
+except (OSError, ValueError):
+    data = {}
+if not isinstance(data, dict):
+    data = {}
+results = data.get("results")
+has_more = data.get("has_more")
+# Stop on missing/non-true has_more, or on an empty page (defensive).
+print("yes" if has_more is True and isinstance(results, list) and results else "no")
+PY
+)"
+        [[ "$advance" == "yes" ]] || break
+        page=$((page + 1))
+      done
+      RECALL_PAGES_DIR="$pages_dir" \
+      RECALL_REPO_PREFIX="${PROJECT_NAME}/projects/${REPOSITORY_SLUG}/" \
+      RECALL_GLOBAL_PREFIX="${PROJECT_NAME}/global/" \
+      python3 - <<'PY'
+import json
+import os
+
+pages_dir = os.environ["RECALL_PAGES_DIR"]
+repo_prefix = os.environ["RECALL_REPO_PREFIX"]
+global_prefix = os.environ["RECALL_GLOBAL_PREFIX"]
+
+seen = set()
+final = []
+page = 1
+while True:
+    path = os.path.join(pages_dir, "%d.json" % page)
+    if not os.path.exists(path):
+        break
+    try:
+        with open(path, encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        data = {}
+    results = data.get("results") if isinstance(data, dict) else None
+    if isinstance(results, list):
+        for item in results:
+            if not isinstance(item, dict):
+                continue
+            permalink = item.get("permalink")
+            if permalink is None:
+                continue
+            if not (permalink.startswith(repo_prefix) or permalink.startswith(global_prefix)):
+                continue
+            if permalink in seen:
+                continue
+            seen.add(permalink)
+            final.append(item)
+    page += 1
+
+print(json.dumps({"results": final, "total": len(final)}))
+PY
+    fi
     ;;
   remember)
     require_text "$@"
