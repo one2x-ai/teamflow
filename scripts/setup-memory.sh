@@ -4,18 +4,10 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
 
-USING_DEFAULT_MEMORY=true
-if [[ -n "${TEAMFLOW_HOME:-}" || -n "${TEAMFLOW_MEMORY_HOME:-}" || \
-      -n "${WORKFLOW_HOME:-}" || -n "${WORKFLOW_MEMORY_HOME:-}" || \
-      -n "${OPENCODE_WORKFLOW_MEMORY_HOME:-}" ]]; then
-  USING_DEFAULT_MEMORY=false
-fi
-TEAMFLOW_HOME="${TEAMFLOW_HOME:-${WORKFLOW_HOME:-$HOME/.teamflow}}"
-MEMORY_ROOT="${TEAMFLOW_MEMORY_HOME:-${WORKFLOW_MEMORY_HOME:-${OPENCODE_WORKFLOW_MEMORY_HOME:-$TEAMFLOW_HOME/memory}}}"
-PROJECT_NAME="${TEAMFLOW_MEMORY_PROJECT:-${WORKFLOW_MEMORY_PROJECT:-${BASIC_MEMORY_PROJECT:-teamflow}}}"
+TEAMFLOW_HOME="${TEAMFLOW_HOME:-$HOME/.teamflow}"
+MEMORY_ROOT="${TEAMFLOW_MEMORY_HOME:-$TEAMFLOW_HOME/memory}"
+PROJECT_NAME="${TEAMFLOW_MEMORY_PROJECT:-${BASIC_MEMORY_PROJECT:-teamflow}}"
 PROJECT_DIR="$MEMORY_ROOT/knowledge"
-LEGACY_WORKFLOW_MEMORY_ROOT="$HOME/.workflow/memory"
-LEGACY_OPENCODE_MEMORY_ROOT="$HOME/.opencode-workflow/memory"
 
 export BASIC_MEMORY_AUTO_UPDATE=false
 export BASIC_MEMORY_CONFIG_DIR="$MEMORY_ROOT/state"
@@ -66,18 +58,6 @@ fi
 if ! command -v node >/dev/null 2>&1; then
   echo "error: node is required; run ./scripts/bootstrap.sh" >&2
   exit 1
-fi
-
-if [[ "$USING_DEFAULT_MEMORY" == true && ! -e "$MEMORY_ROOT" && \
-      -d "$LEGACY_WORKFLOW_MEMORY_ROOT" ]]; then
-  mkdir -p "$(dirname "$MEMORY_ROOT")"
-  mv "$LEGACY_WORKFLOW_MEMORY_ROOT" "$MEMORY_ROOT"
-  echo "Migrated legacy local memory to: $MEMORY_ROOT"
-elif [[ "$USING_DEFAULT_MEMORY" == true && ! -e "$MEMORY_ROOT" && \
-        -d "$LEGACY_OPENCODE_MEMORY_ROOT" ]]; then
-  mkdir -p "$(dirname "$MEMORY_ROOT")"
-  mv "$LEGACY_OPENCODE_MEMORY_ROOT" "$MEMORY_ROOT"
-  echo "Migrated legacy local memory to: $MEMORY_ROOT"
 fi
 
 mkdir -p "$PROJECT_DIR" "$BASIC_MEMORY_CONFIG_DIR"

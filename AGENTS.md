@@ -49,15 +49,14 @@ Do not hand off vague requests such as "fix it" or "make tests pass".
 - Do not run `git push`, destructive reset, or workspace-cleaning commands unless the user explicitly requests them.
 - Record teamflow run artifacts only below `.teamflow/runs/`.
 - Record each long-running code phase with `teamflow phase`; explicit provider timeout, authentication, quota, overload, transport failure, or user cancellation ends that phase as `BLOCKED` instead of silently restarting it. Silence and elapsed wall time alone are not failures.
+- A delegated response ending with `finish=length` is output truncation, not a successful empty handoff. If its mandatory artifact is absent, finish the phase as `BLOCKED` with the truncation and missing-artifact reasons; do not silently retry inside the same phase.
 - Run `teamflow source-check` after code edits to reject accidental non-printing control bytes.
 - Keep target-project integration limited to the standard `.teamflow/` entry in `.gitignore`; do not scatter runtime files across the repository root.
 - Keep Agent prompts and Skills concise; put shared policy here instead of duplicating it.
 
-## External loop monitoring
+## External loop observation
 
-External coordinators must load `skills/outer-loop-monitor/SKILL.md` when starting or resuming an inner `teamflow run`. Use its script to observe the OpenCode root session, descendant Agent sessions, tool status, classified provider errors, phase receipt, and expected artifacts. Do not infer disconnection from missing terminal output or the absence of an OS child process; OpenCode subagents are child sessions inside the same process.
-
-The monitor is external-only. Keep it below `skills/outer-loop-monitor/`; never add it to `.teamflow/`, `scripts/init-project.sh`, or target-project Agent instructions. It must not expose prompt, reasoning, response, raw error, configuration, or credential content, and it must never terminate the inner loop on its own.
+External coordinators observe metadata only: use `teamflow phase status --run-id <id>` for phase receipts, `teamflow session list --format json` for session summaries, and check expected artifact existence below `.teamflow/runs/`. Never read session files, prompts, reasoning, responses, raw errors, configuration, or credentials. Terminal silence alone is not a failure and must not terminate the inner loop.
 
 ## Cross-project memory
 

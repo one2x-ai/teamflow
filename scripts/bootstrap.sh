@@ -3,45 +3,45 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT_DIR"
-DEFAULT_TEAMFLOW_HOME=false
-if [[ -z "${TEAMFLOW_HOME+x}" && -z "${WORKFLOW_HOME+x}" ]]; then
-  DEFAULT_TEAMFLOW_HOME=true
-fi
-TEAMFLOW_HOME="${TEAMFLOW_HOME:-${WORKFLOW_HOME:-$HOME/.teamflow}}"
+TEAMFLOW_HOME="${TEAMFLOW_HOME:-$HOME/.teamflow}"
 
 if ! command -v git >/dev/null 2>&1; then
   echo "error: git is required" >&2
   exit 1
 fi
 
+MIN_NODE_VERSION="22.19.0"
 if ! command -v node >/dev/null 2>&1; then
-  echo "error: Node.js 20+ is required" >&2
+  echo "error: Node.js $MIN_NODE_VERSION+ is required" >&2
   exit 1
 fi
 
-NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-if (( NODE_MAJOR < 20 )); then
-  echo "error: Node.js 20+ is required; found $(node --version)" >&2
+if ! node -e '
+  const [major, minor, patch] = process.versions.node.split(".").map(Number);
+  const ok = major > 22 || (major === 22 && (minor > 19 || (minor === 19 && patch >= 0)));
+  process.exit(ok ? 0 : 1);
+'; then
+  echo "error: Node.js $MIN_NODE_VERSION+ is required; found $(node --version)" >&2
   exit 1
 fi
 
 if ! command -v npm >/dev/null 2>&1; then
-  echo "error: npm is required to install OpenCode" >&2
+  echo "error: npm is required to install Pi" >&2
   exit 1
 fi
 
-if ! command -v opencode >/dev/null 2>&1; then
-  echo "Installing OpenCode..."
-  npm install --global opencode-ai@latest
+if ! command -v pi >/dev/null 2>&1; then
+  echo "Installing Pi..."
+  npm install --global @earendil-works/pi-coding-agent@latest
 else
-  CURRENT_OPENCODE_VERSION="$(opencode --version)"
-  if LATEST_OPENCODE_VERSION="$(npm --fetch-timeout=15000 --fetch-retries=1 view opencode-ai version 2>/dev/null)"; then
-    if [[ "$CURRENT_OPENCODE_VERSION" != "$LATEST_OPENCODE_VERSION" ]]; then
-      echo "Upgrading OpenCode ${CURRENT_OPENCODE_VERSION} -> ${LATEST_OPENCODE_VERSION}..."
-      opencode upgrade "$LATEST_OPENCODE_VERSION" --method npm
+  CURRENT_PI_VERSION="$(pi --version)"
+  if LATEST_PI_VERSION="$(npm --fetch-timeout=15000 --fetch-retries=1 view @earendil-works/pi-coding-agent version 2>/dev/null)"; then
+    if [[ "$CURRENT_PI_VERSION" != "$LATEST_PI_VERSION" ]]; then
+      echo "Upgrading Pi ${CURRENT_PI_VERSION} -> ${LATEST_PI_VERSION}..."
+      npm install --global "@earendil-works/pi-coding-agent@${LATEST_PI_VERSION}"
     fi
   else
-    echo "warning: could not check the latest OpenCode version; keeping ${CURRENT_OPENCODE_VERSION}" >&2
+    echo "warning: could not check the latest Pi version; keeping ${CURRENT_PI_VERSION}" >&2
   fi
 fi
 
@@ -79,10 +79,7 @@ fi
 
 if [[ ! -f "$TEAMFLOW_HOME/.env" ]]; then
   mkdir -p "$TEAMFLOW_HOME"
-  if [[ "$DEFAULT_TEAMFLOW_HOME" == true && -f "$HOME/.workflow/.env" ]]; then
-    cp -p "$HOME/.workflow/.env" "$TEAMFLOW_HOME/.env"
-    echo "Migrated legacy model credentials to $TEAMFLOW_HOME/.env."
-  elif [[ -f .teamflow/.env ]]; then
+  if [[ -f .teamflow/.env ]]; then
     cp .teamflow/.env "$TEAMFLOW_HOME/.env"
     echo "Migrated model credentials to $TEAMFLOW_HOME/.env."
   elif [[ -f .env ]]; then
@@ -94,14 +91,7 @@ if [[ ! -f "$TEAMFLOW_HOME/.env" ]]; then
   fi
 fi
 
-LAUNCHER_DIR="${TEAMFLOW_BIN_DIR:-${WORKFLOW_BIN_DIR:-$HOME/.local/bin}}"
-LEGACY_COMMAND="$LAUNCHER_DIR/workflow"
-if [[ -f "$LEGACY_COMMAND" && ! -L "$LEGACY_COMMAND" ]] && \
-   grep -q 'agent-workflow-launcher' "$LEGACY_COMMAND"; then
-  rm -f "$LEGACY_COMMAND"
-elif [[ -e "$LEGACY_COMMAND" || -L "$LEGACY_COMMAND" ]]; then
-  echo "warning: preserving unrelated legacy command: $LEGACY_COMMAND" >&2
-fi
+LAUNCHER_DIR="${TEAMFLOW_BIN_DIR:-$HOME/.local/bin}"
 LAUNCHER_PATH="$LAUNCHER_DIR/teamflow"
 if [[ -f "$LAUNCHER_PATH" ]] && ! grep -q 'agent-teamflow-launcher' "$LAUNCHER_PATH"; then
   echo "warning: not replacing unrelated command: $LAUNCHER_PATH" >&2
@@ -111,6 +101,6 @@ else
   echo "Installed teamflow launcher: $LAUNCHER_PATH"
 fi
 
-echo "OpenCode $(opencode --version) is available."
+echo "Pi $(pi --version) is available."
 echo "$(basic-memory --version) is available."
 echo "Next: edit .env, run setup-memory.sh and doctor.sh, then init-project.sh <target-project>."

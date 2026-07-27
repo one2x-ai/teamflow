@@ -3,11 +3,16 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 RUNTIME_DIR="$ROOT_DIR/.teamflow"
-TEAMFLOW_HOME="${TEAMFLOW_HOME:-${WORKFLOW_HOME:-$HOME/.teamflow}}"
+TEAMFLOW_HOME="${TEAMFLOW_HOME:-$HOME/.teamflow}"
 cd "$ROOT_DIR"
 
-export OPENCODE_CONFIG="$RUNTIME_DIR/config.json"
-export OPENCODE_CONFIG_DIR="$RUNTIME_DIR"
+export PI_CODING_AGENT_DIR="$RUNTIME_DIR"
+
+# Local metadata inspection must not depend on project credential files.
+if [[ "${1:-}" == "debug" ]]; then
+  shift
+  exec python3 "$RUNTIME_DIR/bin/pi-runtime" debug "$@"
+fi
 
 INHERITED_KIMI_API_KEY="${KIMI_API_KEY:-}"
 INHERITED_ZHIPU_API_KEY="${ZHIPU_API_KEY:-}"
@@ -48,6 +53,11 @@ if [[ "${1:-}" == "test-patch" ]]; then
   exec "$RUNTIME_DIR/bin/test-patch" "$@"
 fi
 
+if [[ "${1:-}" == "server" ]]; then
+  shift
+  exec "$RUNTIME_DIR/bin/server" "$@"
+fi
+
 if [[ "${1:-}" == "source-check" ]]; then
   shift
   exec python3 "$RUNTIME_DIR/skills/implement-change/scripts/source_safety.py" "$@"
@@ -58,9 +68,19 @@ if [[ "${1:-}" == "phase" ]]; then
   exec python3 "$RUNTIME_DIR/skills/plan-change/scripts/phase_state.py" "$@"
 fi
 
-if [[ "${1:-}" == "command" ]]; then
+if [[ "${1:-}" == "run" ]]; then
   shift
-  exec opencode run --agent command "$@"
+  exec python3 "$RUNTIME_DIR/bin/pi-runtime" run "$@"
 fi
 
-exec opencode "$@"
+if [[ "${1:-}" == "session" ]]; then
+  shift
+  exec python3 "$RUNTIME_DIR/bin/pi-runtime" session "$@"
+fi
+
+if [[ "${1:-}" == "command" ]]; then
+  shift
+  exec python3 "$RUNTIME_DIR/bin/pi-runtime" run --agent command "$@"
+fi
+
+exec pi "$@"

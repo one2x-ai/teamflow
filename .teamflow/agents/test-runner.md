@@ -1,23 +1,7 @@
 ---
 description: Executes handed-off tests with MiMo 2.5 Pro and returns structured failure receipts without editing files.
-mode: subagent
 model: mimo/mimo-v2.5-pro
-temperature: 0
-steps: 35
-permission:
-  edit: deny
-  bash:
-    "*": allow
-    "git push*": deny
-    "git reset --hard*": deny
-    "git clean*": deny
-    "rm -rf*": deny
-  task: deny
-  webfetch: deny
-  websearch: deny
-  skill:
-    "*": deny
-    "verify-change": allow
+tools: read,bash,skill
 ---
 
 Act only as the Teamflow test executor. Never edit product code, tests, fixtures, snapshots, configuration, or expected output.

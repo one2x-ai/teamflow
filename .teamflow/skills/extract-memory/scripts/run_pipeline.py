@@ -26,9 +26,7 @@ EMOTION_ACTIONS = {"ignore", "retain_signal", "propose_boundary", "propose_prefe
 PROTECTED_LITERAL_RE = re.compile(r"\b(?=[A-Za-z0-9]{15,}\b)(?=[A-Za-z0-9]*\d)[A-Za-z0-9]+\b")
 DATED_ID_RE = re.compile(r"\b[a-z][a-z0-9_.-]*-\d{6}\b")
 SECRET_RE = re.compile(r"(?i)(?:api[_-]?key|authorization|bearer|secret)\s*[:=]\s*[^\s,;]+|\bsk-[A-Za-z0-9_-]{12,}")
-MAX_CREATES_PER_RUN = int(
-    os.environ.get("TEAMFLOW_MEMORY_MAX_CREATES_PER_RUN", os.environ.get("WORKFLOW_MEMORY_MAX_CREATES_PER_RUN", "8"))
-)
+MAX_CREATES_PER_RUN = int(os.environ.get("TEAMFLOW_MEMORY_MAX_CREATES_PER_RUN", "8"))
 
 
 def fail(message: str) -> None:
@@ -54,10 +52,7 @@ def parse_model_stage_timeout(value: str | None) -> int | None:
 
 def configured_model_stage_timeout() -> int | None:
     try:
-        value = os.environ.get(
-            "TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS",
-            os.environ.get("WORKFLOW_MODEL_STAGE_TIMEOUT_SECONDS"),
-        )
+        value = os.environ.get("TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS")
         return parse_model_stage_timeout(value)
     except ValueError as exc:
         fail(str(exc))
@@ -115,10 +110,20 @@ def validate_capture_receipt(value: object) -> list[str]:
 
 
 def candidate_text(item: dict) -> str:
+    content = item.get("content")
+    if isinstance(content, str) and content.strip():
+        return content.strip()
     statement = item.get("statement")
     if isinstance(statement, str) and statement.strip():
         return statement.strip()
-    return " ".join(str(item.get(key, "")).strip() for key in ("subject", "predicate", "object") if item.get(key)).strip()
+    parts = [
+        str(item.get(key, "")).strip()
+        for key in ("subject", "predicate", "object")
+        if isinstance(item.get(key), str) and item.get(key).strip()
+    ]
+    if len(parts) == 3:
+        return " ".join(parts)
+    return ""
 
 
 def apply_candidates(project_root: Path, run_dir: Path, formatting: dict, repository_slug: str) -> dict:
@@ -129,14 +134,9 @@ def apply_candidates(project_root: Path, run_dir: Path, formatting: dict, reposi
         "skipped": [],
         "source_disposition": formatting.get("source_disposition", []),
     }
-    teamflow_home = Path(
-        os.environ.get("TEAMFLOW_HOME", os.environ.get("WORKFLOW_HOME", str(Path.home() / ".teamflow")))
-    ).expanduser()
+    teamflow_home = Path(os.environ.get("TEAMFLOW_HOME", str(Path.home() / ".teamflow"))).expanduser()
     memory_root = Path(
-        os.environ.get(
-            "TEAMFLOW_MEMORY_HOME",
-            os.environ.get("WORKFLOW_MEMORY_HOME", str(teamflow_home / "memory")),
-        )
+        os.environ.get("TEAMFLOW_MEMORY_HOME", str(teamflow_home / "memory"))
     ).expanduser()
     memory_env = os.environ.copy()
     memory_env["BASIC_MEMORY_AUTO_UPDATE"] = "false"
@@ -144,8 +144,7 @@ def apply_candidates(project_root: Path, run_dir: Path, formatting: dict, reposi
     memory_env["BASIC_MEMORY_HOME"] = str(memory_root / "knowledge")
     memory_env["BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED"] = "false"
     memory_project = os.environ.get(
-        "TEAMFLOW_MEMORY_PROJECT",
-        os.environ.get("WORKFLOW_MEMORY_PROJECT", os.environ.get("BASIC_MEMORY_PROJECT", "teamflow")),
+        "TEAMFLOW_MEMORY_PROJECT", os.environ.get("BASIC_MEMORY_PROJECT", "teamflow")
     )
     capsule_path = run_dir / "00-evidence-capsule.json"
     if capsule_path.is_file():
@@ -412,6 +411,11 @@ def validate_stage(
                 errors.append(f"candidate {item.get('id')} has unknown evidence_refs")
             if item.get("evidence_ids") and set(item.get("evidence_ids", [])) - evidence_ids:
                 errors.append(f"candidate {item.get('id')} has unknown evidence ids")
+            if item.get("action") in {"create", "update", "supersede"} and not candidate_text(item):
+                errors.append(
+                    f"candidate {item.get('id')} has no canonical semantic text "
+                    "(provide non-empty content, a legacy statement, or a complete subject-predicate-object triple; subject alone is invalid)"
+                )
         concept_candidate_subjects = {
             item.get("subject")
             for item in value.get("candidates", [])
@@ -469,11 +473,8 @@ def resume_formatting(project_root: Path, runtime: Path, teamflow: Path, run_id:
         "invent semantics, write Basic Memory, or include Markdown fences."
     )
     result = run_model([str(teamflow), "run", "--agent", "memory-formatter", prompt], project_root)
-    with (run_dir / "formatting.log").open("a", encoding="utf-8") as log:
-        log.write("\n--- formatting contract resume ---\n")
-        log.write(result.stdout + result.stderr)
     if result.returncode != 0 or not output_path.is_file():
-        fail("resumed formatting agent failed; see formatting.log")
+        fail("resumed formatting agent failed; see manifest receipt")
     value = json.loads(output_path.read_text(encoding="utf-8"))
     errors = validate_stage(
         "formatting", value, source_ids, note_source_ids,
@@ -496,11 +497,8 @@ def resume_formatting(project_root: Path, runtime: Path, teamflow: Path, run_id:
         repair_result = run_model(
             [str(teamflow), "run", "--agent", "memory-formatter", repair_prompt], project_root
         )
-        with (run_dir / "formatting.log").open("a", encoding="utf-8") as log:
-            log.write("\n--- resumed formatting validation repair ---\n")
-            log.write(repair_result.stdout + repair_result.stderr)
         if repair_result.returncode != 0 or not output_path.is_file():
-            fail("resumed formatting repair failed; see formatting.log")
+            fail("resumed formatting repair failed; see manifest receipt")
         try:
             value = json.loads(output_path.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
@@ -712,9 +710,6 @@ def main() -> None:
     emotion_result = run_model(
         [str(teamflow), "run", "--agent", "emotional-salience-sensor", emotion_prompt], project_root
     )
-    (run_dir / "emotion-detection.log").write_text(
-        emotion_result.stdout + emotion_result.stderr, encoding="utf-8"
-    )
     manifest["stages"]["emotion_detection"] = {
         "agent": "emotional-salience-sensor",
         "exit_code": emotion_result.returncode,
@@ -722,10 +717,17 @@ def main() -> None:
     }
     write_json(run_dir / "manifest.json", manifest)
     if emotion_result.returncode != 0 or not emotion_output.is_file():
-        fail("emotion detection failed; see emotion-detection.log")
+        manifest["stages"]["emotion_detection"]["failure_kind"] = (
+            "timeout" if emotion_result.returncode == 124 else
+            "agent_exit" if emotion_result.returncode != 0 else "missing_output"
+        )
+        write_json(run_dir / "manifest.json", manifest)
+        fail("emotion detection failed; see manifest receipt")
     try:
         emotion_value = json.loads(emotion_output.read_text(encoding="utf-8"))
     except json.JSONDecodeError as exc:
+        manifest["stages"]["emotion_detection"]["failure_kind"] = "invalid_json"
+        write_json(run_dir / "manifest.json", manifest)
         fail(f"{emotion_output.name} is invalid JSON: {exc}")
     emotion_errors = validate_emotion(emotion_value, source_ids)
     if emotion_errors:
@@ -740,24 +742,36 @@ def main() -> None:
         repair_result = run_model(
             [str(teamflow), "run", "--agent", "emotional-salience-sensor", repair_prompt], project_root
         )
-        with (run_dir / "emotion-detection.log").open("a", encoding="utf-8") as log:
-            log.write("\n--- deterministic emotion repair ---\n")
-            log.write(repair_result.stdout + repair_result.stderr)
         manifest["stages"]["emotion_detection"]["repair_exit_code"] = repair_result.returncode
         write_json(run_dir / "manifest.json", manifest)
         if repair_result.returncode != 0 or not emotion_output.is_file():
-            fail("emotion detection repair failed; see emotion-detection.log")
+            manifest["stages"]["emotion_detection"]["repair_status"] = "failed"
+            manifest["stages"]["emotion_detection"]["failure_kind"] = (
+                "timeout" if repair_result.returncode == 124 else
+                "agent_exit" if repair_result.returncode != 0 else "missing_output"
+            )
+            write_json(run_dir / "manifest.json", manifest)
+            fail("emotion detection repair failed; see manifest receipt")
         try:
             emotion_value = json.loads(emotion_output.read_text(encoding="utf-8"))
         except json.JSONDecodeError as exc:
+            manifest["stages"]["emotion_detection"]["repair_status"] = "failed"
+            manifest["stages"]["emotion_detection"]["failure_kind"] = "invalid_json"
+            write_json(run_dir / "manifest.json", manifest)
             fail(f"repaired {emotion_output.name} is invalid JSON: {exc}")
         emotion_errors = validate_emotion(emotion_value, source_ids)
+        manifest["stages"]["emotion_detection"]["repair_status"] = (
+            "passed" if not emotion_errors else "failed"
+        )
+        write_json(run_dir / "manifest.json", manifest)
     validation["stages"]["emotion_detection"] = {
         "passed": not emotion_errors,
         "errors": emotion_errors,
         "repair_attempted": "repair_exit_code" in manifest["stages"]["emotion_detection"],
     }
     if emotion_errors:
+        manifest["stages"]["emotion_detection"]["failure_kind"] = "contract_violation"
+        write_json(run_dir / "manifest.json", manifest)
         validation["passed"] = False
         write_json(run_dir / "40-validation.json", validation)
         fail(f"emotion detection validation failed: {'; '.join(emotion_errors)}")
@@ -785,14 +799,18 @@ def main() -> None:
             f"{output_path.relative_to(project_root)}.{extra_inputs} Do not read other repository files, "
             "do not write Basic Memory, and do not include Markdown fences."
         )
-        log_path = run_dir / f"{stage}.log"
         result = run_model([str(teamflow), "run", "--agent", agent, prompt], project_root)
-        log_path.write_text(result.stdout + result.stderr, encoding="utf-8")
         manifest["stages"][stage] = {"agent": agent, "exit_code": result.returncode, "output": output_name}
         write_json(run_dir / "manifest.json", manifest)
         if result.returncode != 0:
-            fail(f"{stage} agent failed; see {log_path}")
+            manifest["stages"][stage]["failure_kind"] = (
+                "timeout" if result.returncode == 124 else "agent_exit"
+            )
+            write_json(run_dir / "manifest.json", manifest)
+            fail(f"{stage} agent failed; see manifest receipt")
         if not output_path.is_file():
+            manifest["stages"][stage]["failure_kind"] = "missing_output"
+            write_json(run_dir / "manifest.json", manifest)
             fail(f"{stage} agent did not create {output_path}")
         try:
             value = json.loads(output_path.read_text(encoding="utf-8"))
@@ -811,24 +829,31 @@ def main() -> None:
             repair_result = run_model(
                 [str(teamflow), "run", "--agent", agent, repair_prompt], project_root
             )
-            with log_path.open("a", encoding="utf-8") as log:
-                log.write("\n--- deterministic validation repair ---\n")
-                log.write(repair_result.stdout + repair_result.stderr)
             manifest["stages"][stage]["repair_exit_code"] = repair_result.returncode
             write_json(run_dir / "manifest.json", manifest)
             if repair_result.returncode != 0 or not output_path.is_file():
-                fail(f"{stage} repair failed; see {log_path}")
+                manifest["stages"][stage]["repair_status"] = "failed"
+                manifest["stages"][stage]["failure_kind"] = (
+                    "timeout" if repair_result.returncode == 124 else
+                    "agent_exit" if repair_result.returncode != 0 else "missing_output"
+                )
+                write_json(run_dir / "manifest.json", manifest)
+                fail(f"{stage} repair failed; see manifest receipt")
             try:
                 value = json.loads(output_path.read_text(encoding="utf-8"))
             except json.JSONDecodeError as exc:
                 fail(f"repaired {output_name} is invalid JSON: {exc}")
             errors = validate_stage(stage, value, source_ids, note_source_ids, prior, source_text)
+            manifest["stages"][stage]["repair_status"] = "passed" if not errors else "failed"
+            write_json(run_dir / "manifest.json", manifest)
         validation["stages"][stage] = {
             "passed": not errors,
             "errors": errors,
             "repair_attempted": "repair_exit_code" in manifest["stages"][stage],
         }
         if errors:
+            manifest["stages"][stage]["failure_kind"] = "contract_violation"
+            write_json(run_dir / "manifest.json", manifest)
             validation["passed"] = False
             write_json(run_dir / "40-validation.json", validation)
             fail(f"{stage} validation failed after one repair: {'; '.join(errors)}")

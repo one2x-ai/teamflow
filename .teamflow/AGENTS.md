@@ -43,6 +43,7 @@ Every handoff must include goal, scope, acceptance criteria, constraints, eviden
 - Do not push, force-reset, or clean the workspace without explicit authorization.
 - Put temporary teamflow run artifacts below `.teamflow/runs/`.
 - Wrap delegated code phases with `teamflow phase start/finish`; explicit provider timeout, authentication, quota, overload, transport failure, and user cancellation are `BLOCKED`, not implicit retries of the full Teamflow process. There is no local wall-time timeout by default, so silence while a provider queues is not failure evidence.
+- A delegated response ending with `finish=length` is output truncation, not a successful empty handoff. If its mandatory artifact is absent, finish the phase as `BLOCKED` with the truncation and missing-artifact reasons; do not silently retry inside the same phase.
 - Run `teamflow source-check` after implementation edits and before test execution.
 
 ## Shared memory

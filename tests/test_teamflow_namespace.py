@@ -103,7 +103,6 @@ class PublicNamespaceTests(unittest.TestCase):
 
     def test_runtime_templates_and_primary_environment_names_are_teamflow(self):
         expected = [
-            ROOT / ".teamflow/config.json",
             ROOT / ".teamflow/bin/teamflow",
             ROOT / ".teamflow/skills/extract-memory/scripts/run_pipeline.py",
         ]
@@ -224,7 +223,7 @@ class InstallerNamespaceTests(unittest.TestCase):
             "# Local coding workflow runtime\n.workflow/\n", encoding="utf-8"
         )
 
-    def test_managed_workflow_runtime_upgrades_without_force(self):
+    def test_old_runtime_is_ignored_during_current_install(self):
         with tempfile.TemporaryDirectory() as directory:
             tools = IsolatedTools(Path(directory))
             project = tools.new_git_project("managed")
@@ -232,13 +231,13 @@ class InstallerNamespaceTests(unittest.TestCase):
 
             completed = tools.initialize(project)
             self.assertEqual(completed.returncode, 0, completed.stderr)
-            self.assertFalse((project / ".workflow").exists())
+            self.assertTrue((project / ".workflow/bin/workflow").is_file())
             self.assertTrue((project / ".teamflow/bin/teamflow").is_file())
             ignore_lines = (project / ".gitignore").read_text(encoding="utf-8").splitlines()
             self.assertIn(".teamflow/", ignore_lines)
-            self.assertNotIn(".workflow/", ignore_lines)
+            self.assertIn(".workflow/", ignore_lines)
 
-    def test_modified_workflow_runtime_blocks_then_force_backs_it_up(self):
+    def test_modified_old_runtime_is_preserved_without_backup_or_force(self):
         with tempfile.TemporaryDirectory() as directory:
             tools = IsolatedTools(Path(directory))
             project = tools.new_git_project("modified")
@@ -246,14 +245,9 @@ class InstallerNamespaceTests(unittest.TestCase):
             modified = b"#!/bin/sh\nprintf 'user change\\n'\n"
             self.install_legacy_runtime(project, recorded=original, current=modified)
 
-            blocked = tools.initialize(project)
-            self.assertNotEqual(blocked.returncode, 0)
+            completed = tools.initialize(project)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertEqual((project / ".workflow/bin/workflow").read_bytes(), modified)
-            self.assertFalse((project / ".teamflow").exists())
-
-            forced = tools.initialize(project, "--force")
-            self.assertEqual(forced.returncode, 0, forced.stderr)
-            self.assertFalse((project / ".workflow").exists())
+            self.assertTrue((project / ".teamflow/bin/teamflow").is_file())
             backups = list((tools.home / ".teamflow/backups").glob("**/.workflow/bin/workflow"))
-            self.assertEqual(len(backups), 1)
-            self.assertEqual(backups[0].read_bytes(), modified)
+            self.assertEqual(backups, [])

@@ -89,10 +89,9 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 
 ```text
 .teamflow/                    # 整个目录仅本地存在
-├── config.json               # 工作流运行配置
+├── models.json               # Pi provider/model 注册表（唯一 provider 配置）
 ├── manifest.json             # 安装器校验信息
-├── instructions/
-│   └── AGENTS.md             # 工作流共享约束
+├── AGENTS.md                 # Pi 从 agentDir 自动追加的 Teamflow 共享约束
 ├── agents/
 │   ├── planner.md
 │   ├── test-writer.md
@@ -103,24 +102,32 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 │   ├── teamflow              # 项目内入口
 │   ├── memory                # 本地记忆适配器
 │   ├── memory-capture        # 已验证任务的正式记忆链路
-│   └── test-patch            # 测试补丁门禁
+│   ├── test-patch            # 测试补丁门禁
+│   └── server                # 只读本地记忆浏览服务
+├── extensions/
+│   └── teamflow-task/        # task(agent, prompt) 角色启动器（仅 planner 深度 0 注册）
+├── server/                   # Bun + TypeScript HTTP 服务源码
 ├── experiments/bin/          # 显式调用的临时实验，不由 teamflow 命令暴露
 └── runs/                     # 临时运行产物
 ```
 
 全局 `teamflow` 命令只负责定位当前 Git 项目，再调用 `.teamflow/bin/teamflow`。包装器通过显式配置路径加载 Agents 和 Skills，因此业务根目录不需要任何 harness 配置或目录。
 
-## 旧安装迁移
+### 公共 CLI 映射
 
-重新执行初始化器会迁移旧布局：
+包装器导出 `PI_CODING_AGENT_DIR` 指向项目 `.teamflow/`，并把角色路由到底层运行时：
 
-- 删除由旧安装器管理且未被用户修改的根级 `opencode.json`。
-- 删除旧 `.opencode/` 运行目录。
-- 删除旧 `scripts/opencode.sh` 和 `scripts/memory.sh`。
-- 移除旧安装器写入 `.gitignore` 的精确规则块。
-- 将旧 `.workflow/` 中未被安装器管理的运行数据迁移到 `.teamflow/`，再统一由 `.gitignore` 忽略。
+```bash
+teamflow run --agent planner "分析需求"     # 按 agents/<role>.md frontmatter 解析 provider/model/system prompt
+teamflow command "列出当前分支"             # command 角色的快捷入口
+teamflow debug agent [名称]                 # 查看项目 .teamflow/agents/ 中的 Agent 元数据
+teamflow debug skill                        # 列出项目 .teamflow/skills/ 中已安装的 Skill
+teamflow session list --format json         # 仅输出会话元数据（id/model/provider/时间/message_count）
+```
 
-检测到用户修改或无法识别的旧文件时会停止。只有显式使用 `--force` 才会备份后迁移。
+角色身份由 `agents/<role>.md` 的 Markdown frontmatter 唯一确定：`model`（`<provider>/<model>`）映射到 provider 与模型，文件正文即系统提示；`test-runner` 通过 frontmatter 的 `tools` 排除 edit 保持只读。Pi 会从 `PI_CODING_AGENT_DIR=.teamflow` 自动追加 `.teamflow/AGENTS.md`，并继续追加业务项目根目录已有的 `AGENTS.md`；运行器不再显式追加同一文件，避免重复注入。会话目录默认读取 `TEAMFLOW_PI_SESSION_DIR`，未设置时回退到 `$PI_CODING_AGENT_DIR/sessions`。
+
+`pi-runtime run` 会通过 `--extension` 加载 `.teamflow/extensions/teamflow-task/index.ts` 并导出 `TEAMFLOW_AGENT_ROLE`/`TEAMFLOW_AGENT_DEPTH=0`。该扩展仅在深度 0（planner）注册 `task(agent, prompt)` 工具：按文件名在 `.teamflow/agents/` 中解析角色 Markdown，用 frontmatter 的 `model`（`<provider>/<model>`）与可选 `tools` 启动隔离的 pi 子进程（JSON 模式），子进程环境为 `TEAMFLOW_AGENT_ROLE=<role>`、`TEAMFLOW_AGENT_DEPTH=1`，未知角色、非零退出、取消以及 `stopReason` 为 `error`/`aborted`/`length` 时显式失败。
 
 ## 模型配置
 
@@ -141,7 +148,7 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 - DeepSeek：`https://api.deepseek.com`（`deepseek/deepseek-v4-pro`）
 - 智谱 GLM Coding Plan：`https://open.bigmodel.cn/api/coding/paas/v4`
 
-底层配置使用当前稳定版 OpenCode schema；这一实现细节封装在 `.teamflow/bin/teamflow` 内，日常使用不直接调用 OpenCode 命令。
+底层由 Pi runtime 读取 `.teamflow/models.json` 和 Agent Markdown frontmatter，角色解析不依赖额外兼容配置。
 
 明确的命令式任务不启动 GLM planner 与 K3 coder，直接使用快速命令模式：
 
@@ -151,11 +158,11 @@ teamflow command "检查当前 diff，提交到 feat/example 并创建 PR"
 
 该模式由 MiMo 2.5 Pro 执行，仅适用于无需修改业务内容的状态检查、测试执行、分支、提交、push 和 PR 操作；危险清理、强制推送、代码编辑和子 Agent 委派均被禁止。
 
-OpenCode 以流式方式消费模型响应。所有 provider 都显式设置 `timeout: false` 与 `headerTimeout: false`，且不配置 `chunkTimeout`，因此本地不会因为等待响应头、provider 排队或流式 chunk 暂停而主动结束请求。明确的 provider timeout、认证失败、额度不足、overload、传输失败、用户取消或进程退出仍必须结束当前阶段并返回真实的 `BLOCKED`；不能把错误折叠为空结果或静默重试整轮。`teamflow phase status --run-id <id>` 查看当前阶段，增加 `--phase <name>` 可读历史阶段回执；其中 stale 只表示观察时间较长，不会终止模型。K3 每批编辑后必须运行 `teamflow source-check`，它会拒绝 NUL、ESC、DEL 等误入源码的非打印控制字节。
+Pi 以流式方式消费模型响应。明确的 provider timeout、认证失败、额度不足、overload、传输失败、用户取消或进程退出必须结束当前阶段并返回真实的 `BLOCKED`；不能把错误折叠为空结果或静默重试整轮。`teamflow phase status --run-id <id>` 查看当前阶段，增加 `--phase <name>` 可读历史阶段回执；其中 stale 只表示观察时间较长，不会终止模型。K3 每批编辑后必须运行 `teamflow source-check`，它会拒绝 NUL、ESC、DEL 等误入源码的非打印控制字节。
 
 记忆 Agent 默认同样无限等待 provider。只有显式设置正整数 `TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS` 才启用本地 wall-time；零、负数和非整数会被拒绝。若显式 timeout 或 provider 错误发生在 extraction 之后，使用 `teamflow memory-capture --receipt <file> --resume-formatting <run-id>`，不重跑已完成阶段；启用 timeout 时仍会终止整个子进程组，避免后台孤儿继续执行 apply。
 
-teamflow 仓库自身的外层协调器使用 `skills/outer-loop-monitor/` 监听内层 OpenCode loop。脚本依据 root/child session、message finish、part/tool 状态、phase receipt、预期产物和分类后的 provider 错误输出元数据快照或 NDJSON heartbeat，不读取或输出 prompt、reasoning、response、原始错误与凭证。`WAITING_PROVIDER` 和 `DELEGATED_WAITING_PROVIDER` 表示继续等待，不是断联。该 Skill 不在 `.teamflow/` 下，也不会由 `scripts/init-project.sh` 安装到目标项目。
+外层协调只观察元数据：用 `teamflow phase status --run-id <id>` 读取阶段收据，用 `teamflow session list --format json` 读取会话概要，并检查 `.teamflow/runs/` 下约定产物是否存在。它不读取会话文件、prompt、reasoning、response、原始错误或凭证，也不因终端静默自行终止内层运行。
 
 单次任务默认最多自动创建 8 条新记忆；超出时 deterministic validation/apply 会在任何写入前整体拒绝。可通过 `TEAMFLOW_MEMORY_MAX_CREATES_PER_RUN` 显式调整，但不建议常态放宽。
 
@@ -181,7 +188,46 @@ teamflow memory remember "已验证的项目事实；证据：相关测试 PASS�
 teamflow memory remember-global "已在多个项目验证的通用实践。"
 ```
 
+`recall` 默认只检索当前仓库的命名空间（`projects/<slug>/*`）加上全局命名空间（`global/*`），合并结果时保留上游排序、按 permalink 去重，其他仓库的记忆不会出现；如需跨全部记忆的无范围检索，显式设置 `TEAMFLOW_MEMORY_RECALL_SCOPE=all`。
+
 `remember`/`remember-global` 仅保留给显式手工写入；编码任务收尾禁止直接调用，必须生成 verified-task receipt 后运行 `teamflow memory-capture`。
+
+### 只读本地记忆浏览服务
+
+```bash
+teamflow server [--host 127.0.0.1] [--port 7324] [--dir <仓库路径>]
+```
+
+`teamflow server` 启动一个只读、仅本地的 HTTP 服务，用于浏览 Basic Memory 中的记忆。默认绑定 `127.0.0.1`，默认端口 `7324`；也可用环境变量 `TEAMFLOW_SERVER_HOST` / `TEAMFLOW_SERVER_PORT` 配置，优先级为 CLI 参数 > 环境变量 > 默认值。
+
+使用 `--dir` 可按仓库范围浏览：
+
+```bash
+teamflow server --dir ../try/mcap
+```
+
+`<path>` 相对于进程当前工作目录解析（也接受绝对路径），且必须是一个已存在的 Git 工作树；校验失败时服务在绑定端口前直接退出。仓库 slug 的推导规则与 `.teamflow/bin/memory` 一致：取 `remote.origin.url` 的 basename（去掉 `.git` 后缀），转小写，非 `[a-z0-9._-]` 字符折叠为 `-` 并去掉末尾的 `-`；无 remote 时回退为 Git 顶层目录的 basename。`--dir` 模式下先分页读取共享项目，再按 `teamflow/projects/<slug>/` 精确前缀在本地过滤；页面头部会显示当前仓库 slug。不带 `--dir` 时读取全部记忆。
+
+端点：
+
+- `GET /`：交互式只读浏览页面（HTML）。在浏览器打开 `http://127.0.0.1:7324/`（或配置的 host/port）即可使用。
+- `GET /memory?permalink=<记忆标识>`：只读记忆详情页；列表标题会生成该站内链接，不显示内部 permalink 路径。
+- `GET /health`、`GET /api/health`：返回 `{"status": "ok"}`。
+- `GET /api/memories?page=1&page_size=20&query=<可选>`：返回 `{items, page, page_size, total, total_pages, query}`；`page >= 1`，`1 <= page_size <= 100`；无 query 时读取最近活动，有 query 时执行全文搜索。
+- `GET /api/memory?permalink=<记忆标识>`：通过本地 `basic-memory read-note` 读取单条记忆；`--dir` 模式下只允许当前仓库前缀内的记忆。
+
+`GET /` 页面能力：
+
+- 默认以卡片形式浏览最近记忆活动（每页 12 条）。
+- 点击卡片标题打开可读详情，并可返回列表；内部 permalink 和文件路径不会作为页面文本展示。
+- 全文搜索，提交或清空搜索时自动重置到第 1 页。
+- 上一页/下一页分页，并显示“第 N 页 / 共 M 页”指示。
+- 具有可见的加载、空结果与错误状态。
+- 页面为响应式布局，适配桌面与移动端浏览器。
+
+该页面严格只读：不提供任何编辑、创建或删除控件；记忆数据全部通过 `textContent` / `setAttribute` 安全渲染，不做原始 HTML 插值；实现为零 npm 运行时依赖（仅 Bun 内置与浏览器标准 API）。
+
+服务不提供任何写入、编辑或删除端点；非 GET 请求一律返回 405。
 
 实验性运行完整记忆候选流程（只生成候选，不写 Basic Memory）：
 
@@ -215,6 +261,10 @@ teamflow memory-capture --receipt .teamflow/runs/task-receipts/<run-id>/receipt.
 
 测试由 GLM 生成统一补丁到 `.teamflow/runs/test-patches/`。`teamflow test-patch check` 确认改动仅位于普通测试文件或 Rust `#[cfg(test)] mod ...` 后，K3 才可用 `teamflow test-patch apply` 机械应用。
 
+`test-writer` 采用产物优先的检查点：完成一次聚焦代码检查和一次代表性测试惯例检查后，先写 `tests.patch`，再继续校验和精炼。Planner 会在委派返回后独立检查该补丁；`finish=length` 或缺少强制产物会将当前 phase 明确结束为 `BLOCKED`，不会把空返回当成功或在同一 phase 内静默重试。
+
+`teamflow server` 的实现是 Bun + TypeScript，源码位于仓库根目录 `server/`（"实现集中在 `.teamflow/`" 原则的唯一文档化例外）；`scripts/init-project.sh` 会把它安装到目标项目的 `.teamflow/server/` 下。服务使用 `Bun.serve`，运行时只依赖 Bun 内置与标准 API（零 npm 运行时依赖），并通过 `--local` 调用本机已有的 `basic-memory` CLI 读取记忆；不使用 MCP、云同步、账号或密钥。开发期类型检查：`cd server && bun install && bun run typecheck`。
+
 可配置项：
 
 - `TEAMFLOW_HOME`：默认 `$HOME/.teamflow`
@@ -222,8 +272,6 @@ teamflow memory-capture --receipt .teamflow/runs/task-receipts/<run-id>/receipt.
 - `TEAMFLOW_MEMORY_HOME`：默认 `$TEAMFLOW_HOME/memory`
 - `TEAMFLOW_MEMORY_PROJECT`：默认 `teamflow`
 - `TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS`：默认不设置，即不启用本地 wall-time。
-
-首次运行 `setup-memory.sh` 时，如果发现旧的 `~/.workflow/memory` 或更早的 `~/.opencode-workflow/memory` 且新目录不存在，会迁移到 `~/.teamflow/memory`。旧 `WORKFLOW_*` 和 `OPENCODE_WORKFLOW_*` 环境变量仅作为低优先级兼容回退；新 `TEAMFLOW_*` 变量始终优先。
 
 记忆策略：先搜索、后验证，只在全部质量门 PASS 后写入；禁止保存密钥、隐私数据、原始对话、完整日志或未验证猜测。
 
@@ -255,11 +303,12 @@ teamflow debug skill
 ├── README.md
 ├── .env.example
 ├── .teamflow/             # 可安装运行模板
-│   ├── config.json
-│   ├── instructions/
+│   ├── models.json
+│   ├── AGENTS.md
 │   ├── agents/
 │   ├── skills/
 │   └── bin/
+├── server/                # Bun + TypeScript 只读记忆浏览服务源码（仓库级例外）
 └── scripts/
     ├── bootstrap.sh
     ├── doctor.sh

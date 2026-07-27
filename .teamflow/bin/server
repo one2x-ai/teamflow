@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+RUNTIME_DIR="$ROOT_DIR/.teamflow"
+SERVER_DIR="$RUNTIME_DIR/server"
+if [[ ! -d "$SERVER_DIR" ]]; then
+  SERVER_DIR="$ROOT_DIR/server"
+fi
+exec bun "$SERVER_DIR/src/server.ts" "$@"

@@ -19,14 +19,6 @@ def load_pipeline():
 
 
 class QueueWaitTests(unittest.TestCase):
-    def test_all_provider_timeouts_are_explicitly_disabled(self):
-        config = json.loads((ROOT / ".teamflow/config.json").read_text(encoding="utf-8"))
-        for provider in ("zhipuai-coding-plan", "deepseek", "kimi", "mimo"):
-            options = config["provider"][provider]["options"]
-            self.assertIs(options["timeout"], False)
-            self.assertIs(options["headerTimeout"], False)
-            self.assertNotIn("chunkTimeout", options)
-
     def test_memory_stage_timeout_is_disabled_by_default(self):
         pipeline = load_pipeline()
         self.assertIsNone(pipeline.parse_model_stage_timeout(None))
@@ -45,7 +37,7 @@ class QueueWaitTests(unittest.TestCase):
         process = mock.Mock(pid=1234, returncode=0)
         process.communicate.return_value = ("stdout", "stderr")
         env = os.environ.copy()
-        env.pop("WORKFLOW_MODEL_STAGE_TIMEOUT_SECONDS", None)
+        env.pop("TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS", None)
         with mock.patch.dict(os.environ, env, clear=True), mock.patch.object(
             pipeline.subprocess, "Popen", return_value=process
         ):
@@ -58,7 +50,7 @@ class QueueWaitTests(unittest.TestCase):
         process = mock.Mock(pid=1234, returncode=0)
         process.communicate.return_value = ("stdout", "stderr")
         with mock.patch.dict(
-            os.environ, {"WORKFLOW_MODEL_STAGE_TIMEOUT_SECONDS": "17"}, clear=False
+            os.environ, {"TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS": "17"}, clear=False
         ), mock.patch.object(pipeline.subprocess, "Popen", return_value=process):
             pipeline.run_model(["model"], ROOT)
         process.communicate.assert_called_once_with(timeout=17)

@@ -61,10 +61,7 @@ def main() -> None:
             started = datetime.fromisoformat(value["started_at"])
             age = int((datetime.now(timezone.utc) - started).total_seconds())
             value["age_seconds"] = age
-            timeout = os.environ.get(
-                "TEAMFLOW_PHASE_TIMEOUT_SECONDS",
-                os.environ.get("WORKFLOW_PHASE_TIMEOUT_SECONDS", "600"),
-            )
+            timeout = os.environ.get("TEAMFLOW_PHASE_TIMEOUT_SECONDS", "600")
             value["stale"] = age > int(timeout)
     print(json.dumps(value, ensure_ascii=False, indent=2))
 

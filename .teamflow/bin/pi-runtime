@@ -1,0 +1,290 @@
+#!/usr/bin/env python3
+"""Teamflow pi runtime helper.
+
+Maps Teamflow roles to real ``pi`` argv, and provides local ``debug`` and
+``session`` compatibility subcommands. Reads only the project ``.teamflow/``
+directory computed relative to this file so it works with an isolated HOME.
+
+Subcommands:
+  run --agent ROLE PROMPT... [--print]
+  debug agent [NAME]
+  debug skill
+  session list [--format json] [--limit N | -n N]
+"""
+
+import json
+import os
+import sys
+from pathlib import Path
+
+TEAMFLOW_DIR = Path(__file__).resolve().parents[1]
+AGENTS_DIR = TEAMFLOW_DIR / "agents"
+SKILLS_DIR = TEAMFLOW_DIR / "skills"
+TASK_EXTENSION_PATH = TEAMFLOW_DIR / "extensions" / "teamflow-task" / "index.ts"
+
+
+def _fail(message):
+    print(f"pi-runtime: error: {message}", file=sys.stderr)
+    return 1
+
+
+def _read_agent_frontmatter(role):
+    """Return the frontmatter mapping of agents/<role>.md.
+
+    Returns None when the agent file does not exist so the caller can keep
+    the standard ``unknown role`` failure. Agent Markdown frontmatter is the
+    sole source of truth for role identity.
+    """
+    agent_path = AGENTS_DIR / f"{role}.md"
+    if not agent_path.is_file():
+        return None
+    frontmatter = {}
+    seen_open = False
+    for line in agent_path.read_text(encoding="utf-8").splitlines():
+        if line.strip() == "---":
+            if seen_open:
+                break
+            seen_open = True
+            continue
+        if not seen_open:
+            continue
+        if ":" in line and not line.startswith((" ", "\t")):
+            key, _, value = line.partition(":")
+            frontmatter[key.strip()] = value.strip()
+    return frontmatter
+
+
+def _resolve_role(role):
+    """Resolve a role to provider/model/system-prompt from its Markdown."""
+    frontmatter = _read_agent_frontmatter(role)
+    if frontmatter is None:
+        return None
+    model_value = frontmatter.get("model", "")
+    if "/" not in model_value:
+        raise SystemExit(
+            _fail(f"agent {role}: frontmatter model must be '<provider>/<model>'")
+        )
+    provider, _, model = model_value.partition("/")
+    tools = [
+        token.strip()
+        for token in frontmatter.get("tools", "").split(",")
+        if token.strip()
+    ]
+    return {
+        "system_prompt": AGENTS_DIR / f"{role}.md",
+        "provider": provider,
+        "model": model,
+        "tools": tools,
+    }
+
+
+def cmd_run(args):
+    role = None
+    print_only = False
+    prompt_tokens = []
+    i = 0
+    while i < len(args):
+        token = args[i]
+        if token == "--agent":
+            i += 1
+            if i >= len(args):
+                return _fail("--agent requires a role name")
+            role = args[i]
+        elif token == "--print":
+            print_only = True
+        else:
+            prompt_tokens.append(token)
+        i += 1
+
+    if not role:
+        return _fail("run requires --agent ROLE")
+    prompt = " ".join(prompt_tokens)
+
+    entry = _resolve_role(role)
+    if entry is None:
+        return _fail(f"unknown role: {role}")
+
+    argv = [
+        "pi",
+        "-p", prompt,
+        "--mode", "json",
+        "--provider", entry["provider"],
+        "--model", entry["model"],
+        "--system-prompt", str(entry["system_prompt"]),
+        "--extension", str(TASK_EXTENSION_PATH),
+    ]
+    if entry["tools"]:
+        argv += ["--tools", ",".join(entry["tools"])]
+    role_env = {
+        "TEAMFLOW_AGENT_ROLE": role,
+        "TEAMFLOW_AGENT_DEPTH": "0",
+    }
+
+    if print_only:
+        payload = {
+            "role": role,
+            "env": {
+                **role_env,
+                "PI_CODING_AGENT_DIR": os.environ.get("PI_CODING_AGENT_DIR")
+                or str(TEAMFLOW_DIR),
+            },
+            "argv": argv,
+        }
+        print(json.dumps(payload))
+        return 0
+
+    os.environ.update(role_env)
+    os.execvp("pi", argv)
+    return 127  # unreachable: execvp raises on failure
+
+
+def _agent_metadata_lines(name):
+    """Report agent identity from the Markdown frontmatter only."""
+    frontmatter = _read_agent_frontmatter(name)
+    lines = [f"agent: {name}"]
+    lines.append(f"description: {frontmatter.get('description', '')}")
+    lines.append(f"model: {frontmatter.get('model', '')}")
+    if frontmatter.get("tools"):
+        lines.append(f"tools: {frontmatter['tools']}")
+    return lines
+
+
+def cmd_debug(args):
+    if not args:
+        return _fail("debug requires a subcommand: agent | skill")
+    sub, rest = args[0], args[1:]
+
+    if sub == "skill":
+        if not SKILLS_DIR.is_dir():
+            return _fail(f"skills directory not found: {SKILLS_DIR}")
+        for path in sorted(SKILLS_DIR.iterdir()):
+            if path.is_dir():
+                print(path.name)
+        return 0
+
+    if sub == "agent":
+        if not rest:
+            if not AGENTS_DIR.is_dir():
+                return _fail(f"agents directory not found: {AGENTS_DIR}")
+            for path in sorted(AGENTS_DIR.glob("*.md")):
+                print(path.stem)
+            return 0
+        name = rest[0]
+        agent_path = AGENTS_DIR / f"{name}.md"
+        if not agent_path.is_file():
+            return _fail(f"unknown agent: {name}")
+        for line in _agent_metadata_lines(name):
+            print(line)
+        return 0
+
+    return _fail(f"unknown debug subcommand: {sub}")
+
+
+def _session_dir():
+    env_dir = os.environ.get("TEAMFLOW_PI_SESSION_DIR")
+    if env_dir:
+        return Path(env_dir)
+    agent_dir = os.environ.get("PI_CODING_AGENT_DIR")
+    if agent_dir:
+        return Path(agent_dir) / "sessions"
+    return Path.home() / ".pi" / "sessions"
+
+
+def _parse_session_file(path):
+    records = []
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(record, dict):
+                records.append(record)
+    except OSError:
+        return None
+    if not records:
+        return None
+
+    header = next(
+        (r for r in records if r.get("type") == "session_header"), records[0]
+    )
+    messages = [r for r in records if r.get("type") == "message"]
+    if not messages:
+        messages = [r for r in records if r is not header]
+    return {
+        "id": header.get("id") or path.stem,
+        "model": header.get("model"),
+        "provider": header.get("provider"),
+        "created_at": header.get("created_at"),
+        "updated_at": header.get("updated_at"),
+        "message_count": len(messages),
+    }
+
+
+def cmd_session(args):
+    if not args or args[0] != "list":
+        return _fail("session requires the 'list' subcommand")
+    rest = args[1:]
+
+    fmt = "human"
+    limit = None
+    i = 0
+    while i < len(rest):
+        token = rest[i]
+        if token == "--format":
+            i += 1
+            if i >= len(rest):
+                return _fail("--format requires a value")
+            fmt = rest[i]
+        elif token in ("--limit", "-n"):
+            i += 1
+            if i >= len(rest):
+                return _fail(f"{token} requires a value")
+            try:
+                limit = int(rest[i])
+            except ValueError:
+                return _fail(f"invalid limit: {rest[i]}")
+        else:
+            return _fail(f"unknown option: {token}")
+        i += 1
+
+    entries = []
+    session_dir = _session_dir()
+    if session_dir.is_dir():
+        for path in sorted(session_dir.glob("*.jsonl")):
+            entry = _parse_session_file(path)
+            if entry is not None:
+                entries.append(entry)
+    if limit is not None:
+        entries = entries[: max(limit, 0)]
+
+    if fmt == "json":
+        print(json.dumps(entries))
+    else:
+        for entry in entries:
+            print(
+                "{id}  model={model} provider={provider} "
+                "messages={message_count} updated={updated_at}".format(**entry)
+            )
+    return 0
+
+
+def main(argv):
+    if len(argv) < 2:
+        return _fail("usage: pi-runtime <run|debug|session> ...")
+    sub = argv[1]
+    rest = argv[2:]
+    if sub == "run":
+        return cmd_run(rest)
+    if sub == "debug":
+        return cmd_debug(rest)
+    if sub == "session":
+        return cmd_session(rest)
+    return _fail(f"unknown subcommand: {sub}")
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))

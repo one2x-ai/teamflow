@@ -57,7 +57,7 @@ def run_setup(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
 
 
 class TeamflowMemoryNamespaceTests(unittest.TestCase):
-    def test_default_migrates_workflow_memory_and_uses_teamflow_project(self):
+    def test_default_ignores_old_memory_and_uses_teamflow_project(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             home = root / "home"
@@ -73,12 +73,11 @@ class TeamflowMemoryNamespaceTests(unittest.TestCase):
             completed = run_setup(isolated_environment(home, bin_dir, log))
             self.assertEqual(completed.returncode, 0, completed.stderr)
 
-            migrated = home / ".teamflow/memory"
-            self.assertFalse(legacy.exists())
-            self.assertEqual(
-                (migrated / "knowledge/marker.md").read_text(encoding="utf-8"),
-                "preserve me",
-            )
+            current = home / ".teamflow/memory"
+            self.assertTrue(legacy.exists())
+            self.assertEqual(marker.read_text(encoding="utf-8"), "preserve me")
+            self.assertTrue((current / "knowledge").is_dir())
+            self.assertFalse((current / "knowledge/marker.md").exists())
             calls = log.read_text(encoding="utf-8")
             self.assertRegex(
                 calls,

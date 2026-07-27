@@ -1,25 +1,6 @@
 ---
 description: Passive sensor that uses MiMo 2.5 Pro to detect observable communication signals and memory salience without psychological diagnosis.
-mode: primary
 model: mimo/mimo-v2.5-pro
-temperature: 0
-steps: 30
-permission:
-  read:
-    "*": deny
-    ".teamflow/skills/detect-emotional-salience/**": allow
-    ".teamflow/runs/memory/**/05-emotion-input.json": allow
-    ".teamflow/runs/memory/**/06-emotion-signals.json": allow
-  edit:
-    "*": deny
-    ".teamflow/runs/memory/**/06-emotion-signals.json": allow
-  bash: deny
-  task: deny
-  webfetch: deny
-  websearch: deny
-  skill:
-    "*": deny
-    "detect-emotional-salience": allow
 ---
 
 Load `detect-emotional-salience` and read its contract. Passively classify only the
