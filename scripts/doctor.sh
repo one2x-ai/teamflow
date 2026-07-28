@@ -187,7 +187,56 @@ else
   fail "task role-launcher extension .teamflow/extensions/teamflow-task/index.ts is missing"
 fi
 
-for agent in planner command coder test-writer test-runner emotional-salience-sensor memory-compressor memory-extractor memory-formatter; do
+if [[ -f ".teamflow/extensions/memory-context/index.ts" ]]; then
+  pass "memory-context observation extension is installed"
+else
+  fail "memory-context observation extension .teamflow/extensions/memory-context/index.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/memory-context/turn-block.ts" ]]; then
+  pass "cold-memory turn-block module is installed"
+else
+  fail "cold-memory turn-block module .teamflow/extensions/memory-context/turn-block.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/memory-context/cold-memory-store.ts" ]]; then
+  pass "cold-memory-store interface module is installed"
+else
+  fail "cold-memory-store interface module .teamflow/extensions/memory-context/cold-memory-store.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/memory-context/file-cold-store.ts" ]]; then
+  pass "cold-memory file-cold-store module is installed"
+else
+  fail "cold-memory file-cold-store module .teamflow/extensions/memory-context/file-cold-store.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/memory-context/rule-cache.ts" ]]; then
+  pass "rule-cache module is installed"
+else
+  fail "rule-cache module .teamflow/extensions/memory-context/rule-cache.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/memory-context/rule-cache-reducer.ts" ]]; then
+  pass "rule-cache-reducer module is installed"
+else
+  fail "rule-cache-reducer module .teamflow/extensions/memory-context/rule-cache-reducer.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/memory-context/turn-index.ts" ]]; then
+  pass "turn-index module is installed"
+else
+  fail "turn-index module .teamflow/extensions/memory-context/turn-index.ts is missing"
+fi
+
+if [[ -f ".teamflow/settings.json" ]] && \
+   grep -q '"enabled"[[:space:]]*:[[:space:]]*false' .teamflow/settings.json; then
+  pass "compaction is disabled via .teamflow/settings.json"
+else
+  fail ".teamflow/settings.json with compaction.enabled=false is missing"
+fi
+
+for agent in planner command coder test-writer test-runner emotional-salience-sensor memory-compressor memory-extractor memory-formatter memory-indexer; do
   if HOME="$DOCTOR_HOME" ./.teamflow/bin/teamflow debug agent "$agent" >/dev/null 2>&1; then
     pass "agent $agent is discoverable"
   else

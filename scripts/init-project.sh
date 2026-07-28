@@ -46,6 +46,7 @@ done
 
 FILES=(
   ".teamflow/models.json"
+  ".teamflow/settings.json"
   ".teamflow/AGENTS.md"
   ".teamflow/bin/teamflow"
   ".teamflow/bin/pi-runtime"
@@ -54,10 +55,18 @@ FILES=(
   ".teamflow/bin/test-patch"
   ".teamflow/bin/server"
   ".teamflow/extensions/teamflow-task/index.ts"
+  ".teamflow/extensions/memory-context/index.ts"
+  ".teamflow/extensions/memory-context/turn-block.ts"
+  ".teamflow/extensions/memory-context/cold-memory-store.ts"
+  ".teamflow/extensions/memory-context/file-cold-store.ts"
+  ".teamflow/extensions/memory-context/rule-cache.ts"
+  ".teamflow/extensions/memory-context/rule-cache-reducer.ts"
+  ".teamflow/extensions/memory-context/turn-index.ts"
   ".teamflow/experiments/bin/memory-experiment"
   ".teamflow/experiments/bin/memory-compare"
   ".teamflow/experiments/scripts/compare_stage.py"
 )
+# Agent files (including memory-indexer.md) ship via the find loop below.
 while IFS= read -r relative_path; do FILES+=("$relative_path"); done < <(
   cd "$SOURCE_ROOT"
   find .teamflow/agents .teamflow/skills -type f \

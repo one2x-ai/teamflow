@@ -21,6 +21,7 @@ TEAMFLOW_DIR = Path(__file__).resolve().parents[1]
 AGENTS_DIR = TEAMFLOW_DIR / "agents"
 SKILLS_DIR = TEAMFLOW_DIR / "skills"
 TASK_EXTENSION_PATH = TEAMFLOW_DIR / "extensions" / "teamflow-task" / "index.ts"
+MEMORY_CONTEXT_EXTENSION_PATH = TEAMFLOW_DIR / "extensions" / "memory-context" / "index.ts"
 
 
 def _fail(message):
@@ -112,6 +113,8 @@ def cmd_run(args):
         "--model", entry["model"],
         "--system-prompt", str(entry["system_prompt"]),
         "--extension", str(TASK_EXTENSION_PATH),
+        "--extension", str(MEMORY_CONTEXT_EXTENSION_PATH),
+        "--no-context-files",
     ]
     if entry["tools"]:
         argv += ["--tools", ",".join(entry["tools"])]
