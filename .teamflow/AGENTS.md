@@ -49,6 +49,17 @@ Every handoff must include goal, scope, acceptance criteria, constraints, eviden
 - A delegated response ending with `finish=length` is output truncation, not a successful empty handoff. If its mandatory artifact is absent, finish the phase as `BLOCKED` with the truncation and missing-artifact reasons; do not silently retry inside the same phase.
 - Run `teamflow source-check` after implementation edits and before test execution.
 
+## Outer loop observation
+
+An outer coordinator that watches this inner loop must load `observe-inner-loop` and observe metadata only. It is not doing the work, so it must not pay for the inner loop's context.
+
+- Detect the execution path with `teamflow phase status --run-id <id>` (add `--phase <name>` for history) and `teamflow session list --format json`.
+- Confirm progress by testing existence and non-emptiness of expected paths under `.teamflow/runs/`; do not read artifact bodies.
+- Never read session files, prompts, reasoning, model responses, raw provider errors, configuration, or credentials.
+- `RUNNING` with `stale: true` means observation time exceeded `TEAMFLOW_PHASE_TIMEOUT_SECONDS`; it is not a failure. `BLOCKED` is the only stop signal.
+- Poll at most every 30 seconds, report only status or phase transitions, and stay silent while state is unchanged.
+- Terminal silence and elapsed wall time alone are never failure evidence and must not terminate the inner loop.
+
 ## Shared memory
 
 Basic Memory data is local under `~/.teamflow/memory/`. Use `teamflow memory`; do not start cloud sync or a server process.

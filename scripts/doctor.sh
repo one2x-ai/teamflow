@@ -250,6 +250,7 @@ if grep -q 'plan-change' <<<"$SKILL_OUTPUT" && \
    grep -q 'memory-notes' <<<"$SKILL_OUTPUT" && \
    grep -q 'memory-capture' <<<"$SKILL_OUTPUT" && \
    grep -q 'memory-recall' <<<"$SKILL_OUTPUT" && \
+   grep -q 'observe-inner-loop' <<<"$SKILL_OUTPUT" && \
    grep -q 'memory-curate' <<<"$SKILL_OUTPUT" && \
    grep -q 'extract-memory' <<<"$SKILL_OUTPUT" && \
    grep -q 'detect-emotional-salience' <<<"$SKILL_OUTPUT"; then

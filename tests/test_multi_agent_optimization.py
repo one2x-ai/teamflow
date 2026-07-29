@@ -196,8 +196,30 @@ class MemoryCaptureParallelTests(unittest.TestCase):
             "parallel group must include emotion_detection and compression",
         )
 
-    def test_compression_treats_emotion_as_optional(self):
-        """Compression prompt must not hard-require the emotion artifact."""
+    def test_compression_is_gated_on_emotion_artifact(self):
+        """Compression must wait for the emotion artifact, not race it."""
+        self.assertIn(
+            "gates",
+            self.pipeline,
+            "run_stage_group must support artifact gating",
+        )
+        self.assertRegex(
+            self.pipeline,
+            r'gates\s*=\s*\{\s*"compression":\s*emotion_output',
+            "compression must be gated on the emotion artifact",
+        )
+
+    def test_gate_wait_is_bounded(self):
+        """A missing gate artifact must never hang the run forever."""
+        self.assertIn("GATE_WAIT_CEILING_SECONDS", self.pipeline)
+        self.assertRegex(
+            self.pipeline,
+            r"deadline|time\.monotonic",
+            "gate wait must be bounded by a deadline",
+        )
+
+    def test_compression_handles_missing_emotion_artifact(self):
+        """Compression prompt must define the absent-emotion exclusion reason."""
         self.assertIn(
             "build_compression_extra_inputs",
             self.pipeline,
@@ -206,15 +228,15 @@ class MemoryCaptureParallelTests(unittest.TestCase):
         start = self.pipeline.index("def build_compression_extra_inputs")
         end = self.pipeline.index("def validate_capture_receipt", start)
         compression_prompt = self.pipeline[start:end]
-        self.assertRegex(
-            compression_prompt,
-            r"if it exists|if available|may not exist yet|when present",
-            "compression prompt must treat the emotion artifact as optional",
-        )
         self.assertIn(
             "emotion signals unavailable",
             compression_prompt,
             "compression prompt must define the absent-emotion exclusion reason",
+        )
+        self.assertRegex(
+            compression_prompt,
+            r"when present|if that artifact is missing",
+            "compression prompt must describe both present and missing cases",
         )
 
     def test_emotion_validation_semantics_unchanged(self):

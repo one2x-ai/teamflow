@@ -189,6 +189,8 @@ Pi 以流式方式消费模型响应。明确的 provider timeout、认证失败
 
 外层协调只观察元数据：用 `teamflow phase status --run-id <id>` 读取阶段收据，用 `teamflow session list --format json` 读取会话概要，并检查 `.teamflow/runs/` 下约定产物是否存在。它不读取会话文件、prompt、reasoning、response、原始错误或凭证，也不因终端静默自行终止内层运行。
 
+外层 loop 的这套监听契约固化为可安装 Skill `.teamflow/skills/observe-inner-loop/`，并在 `.teamflow/AGENTS.md` 的「Outer loop observation」章节声明。因为外层 loop 不干活，它必须以最低 token 成本准确探测内层执行路径：只测产物存在性与非空、不读产物正文；`RUNNING` + `stale: true` 仅表示观察时间超过 `TEAMFLOW_PHASE_TIMEOUT_SECONDS`，不是失败，`BLOCKED` 是唯一停止信号；轮询间隔至少 30 秒，状态未变化时保持静默、只报告 phase 与 status 的跃迁。
+
 单次任务默认最多自动创建 8 条新记忆；超出时 deterministic validation/apply 会在任何写入前整体拒绝。可通过 `TEAMFLOW_MEMORY_MAX_CREATES_PER_RUN` 显式调整，但不建议常态放宽。
 
 ## 本地跨项目记忆

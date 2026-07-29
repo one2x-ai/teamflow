@@ -8,6 +8,7 @@ import re
 import signal
 import subprocess
 import sys
+import time
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -28,6 +29,12 @@ PROTECTED_LITERAL_RE = re.compile(r"\b(?=[A-Za-z0-9]{15,}\b)(?=[A-Za-z0-9]*\d)[A
 DATED_ID_RE = re.compile(r"\b[a-z][a-z0-9_.-]*-\d{6}\b")
 SECRET_RE = re.compile(r"(?i)(?:api[_-]?key|authorization|bearer|secret)\s*[:=]\s*[^\s,;]+|\bsk-[A-Za-z0-9_-]{12,}")
 MAX_CREATES_PER_RUN = int(os.environ.get("TEAMFLOW_MEMORY_MAX_CREATES_PER_RUN", "8"))
+# Bounds for run_stage_group artifact gating: a gated stage waits at most
+# this long for its gate artifact when no explicit model-stage timeout is
+# configured, so a missing artifact degrades to an explicit exclusion
+# instead of hanging the run.
+GATE_WAIT_CEILING_SECONDS = 900
+GATE_POLL_INTERVAL_SECONDS = 0.2
 
 
 def fail(message: str) -> None:
@@ -88,23 +95,49 @@ def run_model(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]
 
 
 def run_stage_group(
-    commands: dict[str, list[str]], cwd: Path
+    commands: dict[str, list[str]],
+    cwd: Path,
+    gates: dict[str, Path] | None = None,
 ) -> dict[str, subprocess.CompletedProcess[str]]:
-    """Run independent model stages concurrently and join on all of them.
+    """Run model stages concurrently, optionally gating one on another's artifact.
 
-    Used for the emotion_detection + compression group: both read only
-    already-written inputs (05-emotion-input.json and the evidence capsule
-    plus its source files), so neither blocks on the other's output. Each
-    stage goes through run_model, so timeout, process-group kill, and
+    Used for the emotion_detection + compression group. Both stages are
+    submitted at once so their provider queue time overlaps, but a stage
+    listed in ``gates`` waits until its gate artifact exists before its own
+    model call starts. That keeps the emotion artifact a real input to
+    compression — the "never prematurely discard a salient target"
+    protection stays effective — while still removing the serial gap
+    between the two stages.
+
+    The gate wait ends as soon as the artifact appears; it is bounded by
+    the same TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS budget when one is set,
+    and by GATE_WAIT_CEILING_SECONDS otherwise so a missing artifact can
+    never hang the run forever. When the gate never appears the gated
+    stage still runs, and its prompt tells it to record the missing
+    artifact as an explicit exclusion rather than inventing content.
+
+    Every stage goes through run_model, so timeout, process-group kill, and
     CompletedProcess semantics stay identical to serial execution and a
     single seam remains for tests to intercept. Validation of the joined
     results stays sequential and unchanged, so a failing emotion stage
     still fails the whole run.
     """
+    gates = gates or {}
+    timeout_seconds = configured_model_stage_timeout()
+    gate_budget = timeout_seconds if timeout_seconds is not None else GATE_WAIT_CEILING_SECONDS
+
+    def run_gated(name: str, command: list[str]) -> subprocess.CompletedProcess[str]:
+        gate_path = gates.get(name)
+        if gate_path is not None:
+            deadline = time.monotonic() + gate_budget
+            while not gate_path.exists() and time.monotonic() < deadline:
+                time.sleep(GATE_POLL_INTERVAL_SECONDS)
+        return run_model(command, cwd)
+
     results: dict[str, subprocess.CompletedProcess[str]] = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(commands)) as executor:
         futures = {
-            name: executor.submit(run_model, command, cwd)
+            name: executor.submit(run_gated, name, command)
             for name, command in commands.items()
         }
         for name, future in futures.items():
@@ -117,17 +150,20 @@ def build_compression_extra_inputs(
 ) -> str:
     """Extra prompt text for the compression stage.
 
-    The emotion artifact is optional: compression runs concurrently with
-    emotion detection, so 06-emotion-signals.json may not exist yet when
-    compression starts. When present it is attention metadata only; when
-    absent the compressor records the exclusion instead of blocking.
+    Compression is launched together with emotion detection but gated on the
+    emotion artifact, so 06-emotion-signals.json is normally present by the
+    time the compression model call starts. The absent case is still
+    described because the gate wait is bounded: when the artifact never
+    appears the compressor records the exclusion instead of inventing
+    salience.
     """
     return (
-        " Read every source file listed in the capsule's sources[].path. Also read "
-        f"{emotion_output.relative_to(project_root)} if it exists — it runs concurrently and may not exist yet. "
-        "When present, use emotional salience only as attention metadata: preserve its target or record why it is "
+        " Read every source file listed in the capsule's sources[].path and read "
+        f"{emotion_output.relative_to(project_root)} when present. "
+        "Use emotional salience only as attention metadata: preserve its target or record why it is "
         "excluded, but never treat emotion as evidence or promote a claim solely because its intensity is high. "
-        "When absent, record 'emotion signals unavailable' in excluded and proceed from the capsule and sources alone."
+        "If that artifact is missing, record 'emotion signals unavailable' in excluded and proceed from the "
+        "capsule and sources alone."
     )
 
 
@@ -752,12 +788,9 @@ def main() -> None:
         f"{emotion_output.relative_to(project_root)}. Treat each item id as an opaque source id. "
         "Do not read other files, ask the user questions, diagnose psychology, or write memory."
     )
-    # Phase 2 parallelization: emotion_detection and compression read only
-    # inputs that already exist on disk (05-emotion-input.json for emotion;
-    # the evidence capsule plus its source files for compression), so the two
-    # model calls are launched concurrently and joined before validation.
-    # The compression prompt treats the emotion artifact as optional because
-    # it may not exist yet when compression starts.
+    # Phase 2 parallelization: emotion_detection and compression are submitted
+    # together so their provider queue time overlaps, but compression is gated
+    # on 06-emotion-signals.json so the emotion artifact remains a real input.
     compression_stage, compression_agent, compression_input_name, compression_output_name = STAGES[0]
     compression_input_path = run_dir / compression_input_name
     compression_output_path = run_dir / compression_output_name
@@ -778,6 +811,7 @@ def main() -> None:
             ],
         },
         project_root,
+        gates={"compression": emotion_output},
     )
     emotion_result = group_results["emotion_detection"]
     compression_result = group_results["compression"]
