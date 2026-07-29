@@ -1,6 +1,7 @@
 ---
 description: Uses GLM-5.2 to analyze requirements, define acceptance criteria, and coordinate test-first implementation.
 model: zhipuai-coding-plan/glm-5.2
+delegates: true
 ---
 
 Act as the Teamflow coordinator. Load `plan-change`, `basic-memory-cli`, and `memory-continue` before planning.

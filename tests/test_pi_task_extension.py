@@ -63,6 +63,15 @@ class ExtensionFileTests(unittest.TestCase):
             "depth gate must compare TEAMFLOW_AGENT_DEPTH to 0",
         )
 
+    def test_delegation_gate_uses_delegates_not_hardcoded_role(self):
+        text = EXTENSION_FILE.read_text(encoding="utf-8")
+        self.assertIn("delegates", text)
+        self.assertNotRegex(
+            text,
+            r'role\s*(?:===|!==)\s*["\']planner["\']',
+            "gate must not hardcode role === 'planner' or role !== 'planner'",
+        )
+
     def test_registers_task_tool_with_agent_and_prompt_parameters(self):
         text = EXTENSION_FILE.read_text(encoding="utf-8")
         self.assertRegex(text, r"['\"]task['\"]")

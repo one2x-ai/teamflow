@@ -105,7 +105,7 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 │   ├── test-patch            # 测试补丁门禁
 │   └── server                # 只读本地记忆浏览服务
 ├── extensions/
-│   ├── teamflow-task/        # task(agent, prompt) 角色启动器（仅 planner 深度 0 注册）
+│   ├── teamflow-task/        # task(agent, prompt) 角色启动器（仅显式授权的深度 0 角色注册）
 │   └── memory-context/       # Phase A 观察模式状态机（监听 hook）+ Phase B 冷记忆持久化（turn-block/cold-memory-store/file-cold-store）+ Phase C 可见 XML 上下文注入 + Phase D 热区投影与 no-compact 拦截 + Phase E 准则 cache（rule-cache/rule-cache-reducer）
 ├── server/                   # Bun + TypeScript HTTP 服务源码
 ├── experiments/bin/          # 显式调用的临时实验，不由 teamflow 命令暴露
@@ -128,7 +128,7 @@ teamflow session list --format json         # 仅输出会话元数据（id/mode
 
 角色身份由 `agents/<role>.md` 的 Markdown frontmatter 唯一确定：`model`（`<provider>/<model>`）映射到 provider 与模型，文件正文即系统提示；`test-runner` 通过 frontmatter 的 `tools` 排除 edit 保持只读。Pi 会从 `PI_CODING_AGENT_DIR=.teamflow` 自动追加 `.teamflow/AGENTS.md`，并继续追加业务项目根目录已有的 `AGENTS.md`；运行器不再显式追加同一文件，避免重复注入。会话目录默认读取 `TEAMFLOW_PI_SESSION_DIR`，未设置时回退到 `$PI_CODING_AGENT_DIR/sessions`。
 
-`pi-runtime run` 会通过 `--extension` 加载 `.teamflow/extensions/teamflow-task/index.ts` 并导出 `TEAMFLOW_AGENT_ROLE`/`TEAMFLOW_AGENT_DEPTH=0`。该扩展仅在深度 0（planner）注册 `task(agent, prompt)` 工具：按文件名在 `.teamflow/agents/` 中解析角色 Markdown，用 frontmatter 的 `model`（`<provider>/<model>`）与可选 `tools` 启动隔离的 pi 子进程（JSON 模式），子进程环境为 `TEAMFLOW_AGENT_ROLE=<role>`、`TEAMFLOW_AGENT_DEPTH=1`，未知角色、非零退出、取消以及 `stopReason` 为 `error`/`aborted`/`length` 时显式失败。
+`pi-runtime run` 会通过 `--extension` 加载 `.teamflow/extensions/teamflow-task/index.ts` 并导出 `TEAMFLOW_AGENT_ROLE`/`TEAMFLOW_AGENT_DEPTH=0`。角色只有在 Markdown frontmatter 中以严格布尔值声明 `delegates: true` 且运行深度为 0 时，才会注册 `task(agent, prompt)` 与 `task_group`；缺失、`false` 或字符串形式的值都不授权。扩展按文件名在 `.teamflow/agents/` 中解析角色 Markdown，用 frontmatter 的 `model`（`<provider>/<model>`）与可选 `tools` 启动隔离的 pi 子进程（JSON 模式），子进程环境为 `TEAMFLOW_AGENT_ROLE=<role>`、`TEAMFLOW_AGENT_DEPTH=1`，因此子角色即使带有同一声明也不能继续委派。未知角色、非零退出、取消以及 `stopReason` 为 `error`/`aborted`/`length` 时显式失败。
 
 `pi-runtime run` 还会通过第二个 `--extension` 加载 `.teamflow/extensions/memory-context/index.ts`。该扩展注册 `before_agent_start`、`agent_settled`、`session_start`、`tool_call` 和 `tool_result` hook，跟踪轮次边界和工具因果对，在每轮 `agent_settled` 时计算 SHA-256 观察清单（systemPromptHash、contextMessagesHash、manifestHash），校验工具因果对（unmatchedCalls/unmatchedResults），并通过 `appendEntry('teamflow:observation', ...)` 追加每轮一条不可变观察收据。扩展不添加隐藏系统提示；上下文投影与 compact 拦截由 Phase D 实现（见下）。
 

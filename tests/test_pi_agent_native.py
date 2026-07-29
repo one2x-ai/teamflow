@@ -149,7 +149,7 @@ class ReadmeNoLegacyReferencesTests(unittest.TestCase):
 class AgentFrontmatterTests(unittest.TestCase):
     """AC2: every agent .md frontmatter has only the allowed keys."""
 
-    ALLOWED_KEYS = {"description", "model", "tools"}
+    ALLOWED_KEYS = {"description", "model", "tools", "delegates"}
     FORBIDDEN_KEYS = {"mode", "permission", "temperature", "steps"}
 
     def _agent_files(self):
@@ -359,20 +359,78 @@ class TaskGroupToolTests(unittest.TestCase):
 # ===== AC6: depth gating for both tools =====
 
 class DepthGatingTests(unittest.TestCase):
-    """AC6: both task and task_group gated on planner && depth 0."""
+    """AC6: both tools require explicit delegation permission at depth 0."""
 
     def setUp(self):
         self.text = EXTENSION_FILE.read_text(encoding="utf-8")
 
     def test_both_tools_inside_depth_gate(self):
         self.assertIn("TEAMFLOW_AGENT_DEPTH", self.text)
-        self.assertIn("planner", self.text)
+        self.assertIn("frontmatter.delegates", self.text)
         self.assertRegex(self.text, r"['\"]task['\"]")
         self.assertRegex(self.text, r"['\"]task_group['\"]")
         self.assertTrue(
             re.search(r"===\s*0|==\s*0|<\s*1|!==\s*0", self.text),
             "depth must be compared to 0",
         )
+
+
+# ===== Delegates-based delegation gate =====
+
+class DelegatesGateTests(unittest.TestCase):
+    """Generalized delegation gate: any depth-0 role with delegates: true."""
+
+    def setUp(self):
+        self.text = EXTENSION_FILE.read_text(encoding="utf-8")
+
+    def test_extension_reads_delegates_from_frontmatter(self):
+        self.assertIn(
+            "delegates", self.text,
+            "extension must read 'delegates' from role frontmatter",
+        )
+
+    def test_extension_no_hardcoded_planner_role_gate(self):
+        self.assertNotRegex(
+            self.text,
+            r'role\s*(?:===|!==)\s*["\']planner["\']',
+            "gate must not hardcode role === 'planner' or role !== 'planner'",
+        )
+
+    def test_extension_checks_strict_boolean_true(self):
+        self.assertRegex(
+            self.text,
+            r'frontmatter\.delegates\s*===\s*true',
+            "gate must check frontmatter.delegates === true (strict boolean equality)",
+        )
+
+    def test_extension_still_requires_depth_zero(self):
+        self.assertIn("TEAMFLOW_AGENT_DEPTH", self.text)
+        self.assertRegex(
+            self.text,
+            r'===\s*0|!==\s*0',
+            "gate must still compare depth to 0",
+        )
+
+    def test_planner_has_delegates_true(self):
+        fm = _parse_frontmatter(
+            (AGENTS_DIR / "planner.md").read_text(encoding="utf-8")
+        )
+        self.assertIn("delegates", fm, "planner.md must have delegates key")
+        self.assertEqual(
+            fm["delegates"], "true",
+            "planner.md delegates must be 'true'",
+        )
+
+    def test_no_other_agent_has_delegates_true(self):
+        for path in sorted(AGENTS_DIR.glob("*.md")):
+            if path.name == "planner.md":
+                continue
+            with self.subTest(agent=path.name):
+                fm = _parse_frontmatter(path.read_text(encoding="utf-8"))
+                self.assertNotEqual(
+                    fm.get("delegates"), "true",
+                    f"{path.name} must not have delegates: true",
+                )
 
 
 # ===== Part C: provider-free real Pi extension load test =====
