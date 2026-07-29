@@ -1,13 +1,13 @@
 ---
-name: memory-continue
-description: Resume prior work from the shared Basic Memory store using CLI-only search, recent activity, note reads, and graph context. Use at task start or when the user asks to continue previous work.
+name: memory-recall
+description: Recall prior verified work from the shared local Basic Memory store at task start. Use for cross-project memory search, note reads, and graph context before planning or editing.
 ---
 
-# Memory Continue
+# Memory Recall
 
-Use the repository wrapper so the shared Home-based store and local-only settings are applied consistently.
+Use the repository wrapper for consistent local-only settings.
 
-## Resume with Teamflow
+## Resume workflow
 
 1. Inspect recent activity:
 
@@ -42,3 +42,9 @@ Use the repository wrapper so the shared Home-based store and local-only setting
 - Treat stale or conflicting notes as leads, not authority.
 - If memory is unavailable, continue from current files and report the memory failure separately.
 - Capture the new verified outcome after the task passes through `teamflow memory-capture`; pass every relevant recalled permalink in the task receipt so formatting can deduplicate or defer conflicts.
+
+## Safety
+
+- Keep memory local. Never use `--cloud`, cloud workspaces, login, or MCP commands.
+- Never store secrets, credentials, private user data, raw conversations, full logs, or unverified claims.
+- `remember` and `remember-global` are manual operations only; automated capture must use `teamflow memory-capture` with a verified-task receipt.

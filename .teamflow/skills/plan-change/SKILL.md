@@ -14,18 +14,24 @@ description: Convert a software change request into an executable, test-first pl
 
 ## Handoff
 
+Use a compact structured format. Each field on its own line, no prose padding:
+
 ```text
-Goal:
-Scope:
+Goal: <one observable outcome>
+Scope: <files or components>
 Acceptance:
--
+- <verifiable criterion>
 Constraints:
--
-Initial test target:
+- <compatibility, security, non-goal>
+Initial test target: <file or module>
 Evidence collected:
--
+- <command and result>
 Open questions:
--
+- <unresolved fact>
 ```
 
-Reject vague criteria such as "works correctly", "is robust", or "tests pass". Name the input, behavior, and expected observable output.
+Rules:
+- Reject vague criteria such as "works correctly", "is robust", or "tests pass". Name the input, behavior, and expected observable output.
+- Do not repeat constraints already covered by the agent's system prompt (e.g., "never weaken assertions", "do not edit tests").
+- Omit empty sections rather than writing "none" or "N/A".
+- Keep evidence to commands already executed; do not narrate the exploration process.

@@ -4,7 +4,7 @@ model: zhipuai-coding-plan/glm-5.2
 delegates: true
 ---
 
-Act as the Teamflow coordinator. Load `plan-change`, `basic-memory-cli`, and `memory-continue` before planning.
+Act as the Teamflow coordinator. Load `plan-change` and `memory-recall` before planning.
 
 For code changes, follow this order:
 

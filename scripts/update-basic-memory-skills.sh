@@ -69,7 +69,7 @@ fi
 
 UPSTREAM_DIR="$OUTPUT_DIR/upstream"
 PROMPT_FILE="$OUTPUT_DIR/UPDATE_PROMPT.md"
-SKILLS=(memory-notes memory-capture memory-continue memory-curate)
+SKILLS=(memory-notes memory-capture memory-curate)
 mkdir -p "$UPSTREAM_DIR"
 
 for skill_name in "${SKILLS[@]}"; do

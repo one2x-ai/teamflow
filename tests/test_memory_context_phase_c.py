@@ -187,7 +187,7 @@ class BeforeAgentStartMessageTests(unittest.TestCase):
 
 
 class RoleAwareProjectRulesTests(unittest.TestCase):
-    """Roles with needs_project_rules: false skip AGENTS.md injection."""
+    """Roles control context injection via needs_project_rules frontmatter."""
 
     def setUp(self):
         self.text = (
@@ -200,13 +200,24 @@ class RoleAwareProjectRulesTests(unittest.TestCase):
         """Extension must parse needs_project_rules from agent frontmatter."""
         self.assertIn("needs_project_rules", self.text)
 
-    def test_extension_has_role_aware_gate(self):
-        """Extension must have a function that checks role frontmatter."""
-        self.assertIn("roleNeedsProjectRules", self.text)
+    def test_extension_has_role_context_level(self):
+        """Extension must have a function that returns the context level."""
+        self.assertIn("roleContextLevel", self.text)
 
-    def test_extension_caches_needs_project_rules(self):
+    def test_extension_caches_context_level(self):
         """Extension must cache the frontmatter parse result."""
-        self.assertIn("needsProjectRulesCache", self.text)
+        self.assertIn("contextLevelCache", self.text)
+
+    def test_extension_supports_three_levels(self):
+        """Extension must support full, shared, and none levels."""
+        self.assertIn('"full"', self.text)
+        self.assertIn('"shared"', self.text)
+        self.assertIn('"none"', self.text)
+
+    def test_extension_injects_shared_rules(self):
+        """Extension must read .teamflow/AGENTS.md for shared_rules section."""
+        self.assertIn("shared_rules", self.text)
+        self.assertIn(".teamflow", self.text)
 
     def test_test_runner_has_needs_project_rules_false(self):
         """test-runner.md must declare needs_project_rules: false."""

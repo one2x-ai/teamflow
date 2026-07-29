@@ -237,27 +237,35 @@ function extractMessages(entries: unknown[]): TurnMessage[] {
 	return messages;
 }
 
-// Check whether the current role needs the full AGENTS.md project rules
-// injected. Roles that are pure executors (test-runner, command) declare
-// needs_project_rules: false in frontmatter to skip the injection and
-// save tokens. Default is true for backward compatibility.
-const needsProjectRulesCache = new Map<string, boolean>();
+// Context injection level for each role. Levels:
+//   "full"    — inject both project AGENTS.md and .teamflow/AGENTS.md
+//   "shared"  — inject only .teamflow/AGENTS.md (shared constraints)
+//   "none"    — inject neither (pure executors like test-runner, command)
+// Default is "full" for backward compatibility.
+type ContextLevel = "full" | "shared" | "none";
 
-function roleNeedsProjectRules(role: string | undefined): boolean {
-	if (!role) return true;
-	const cached = needsProjectRulesCache.get(role);
+const contextLevelCache = new Map<string, ContextLevel>();
+
+function roleContextLevel(role: string | undefined): ContextLevel {
+	if (!role) return "full";
+	const cached = contextLevelCache.get(role);
 	if (cached !== undefined) return cached;
 	const agentPath = path.join(AGENTS_DIR, `${role}.md`);
-	if (!fs.existsSync(agentPath)) return true;
+	if (!fs.existsSync(agentPath)) return "full";
 	try {
 		const { frontmatter } = parseFrontmatter<Record<string, unknown>>(
 			fs.readFileSync(agentPath, "utf-8"),
 		);
-		const result = frontmatter.needs_project_rules !== false;
-		needsProjectRulesCache.set(role, result);
-		return result;
+		let level: ContextLevel = "full";
+		if (frontmatter.needs_project_rules === false) {
+			level = "none";
+		} else if (frontmatter.needs_project_rules === "shared") {
+			level = "shared";
+		}
+		contextLevelCache.set(role, level);
+		return level;
 	} catch {
-		return true;
+		return "full";
 	}
 }
 
@@ -324,14 +332,16 @@ export default function (pi: ExtensionAPI) {
 		// Phase C: inject a visible XML context message carrying the
 		// project rules. Pi is launched with --no-context-files, so
 		// AGENTS.md is read explicitly here instead of being hidden in
-		// the system prompt. A missing AGENTS.md yields an empty
-		// project_rules section rather than an error. Roles that declare
-		// needs_project_rules: false skip the AGENTS.md content entirely
-		// to save tokens (they still receive the rule_cache section).
+		// the system prompt. Roles control injection via needs_project_rules:
+		//   "full" (default) — project AGENTS.md + .teamflow/AGENTS.md
+		//   "shared"         — only .teamflow/AGENTS.md
+		//   false            — neither (pure executors)
 		const cwd = event.systemPromptOptions?.cwd || process.cwd();
 		currentCwd = cwd;
 		const agentRole = process.env.TEAMFLOW_AGENT_ROLE;
-		const injectProjectRules = roleNeedsProjectRules(agentRole);
+		const level = roleContextLevel(agentRole);
+		const injectProjectRules = level === "full";
+		const injectSharedRules = level === "full" || level === "shared";
 		let rulesContent = "";
 		if (injectProjectRules) {
 			try {
@@ -341,6 +351,15 @@ export default function (pi: ExtensionAPI) {
 			}
 		}
 		const rulesHash = "sha256:" + createHash("sha256").update(rulesContent).digest("hex");
+		let sharedRulesContent = "";
+		if (injectSharedRules) {
+			try {
+				sharedRulesContent = fs.readFileSync(path.join(cwd, ".teamflow", "AGENTS.md"), "utf-8");
+			} catch {
+				// .teamflow/AGENTS.md not found — shared_rules section will be empty.
+			}
+		}
+		const sharedRulesHash = "sha256:" + createHash("sha256").update(sharedRulesContent).digest("hex");
 		const generatedAt = new Date().toISOString();
 
 		// Phase E: project the rule cache into the visible context. Only
@@ -365,11 +384,17 @@ export default function (pi: ExtensionAPI) {
 		const projectRulesSource = injectProjectRules
 			? `\n    <source kind="project_rules" ref="AGENTS.md" hash="${rulesHash}" />`
 			: "";
+		const sharedRulesSection = injectSharedRules
+			? `\n  <shared_rules>\n${escapeXmlContent(sharedRulesContent)}\n  </shared_rules>`
+			: "";
+		const sharedRulesSource = injectSharedRules
+			? `\n    <source kind="shared_rules" ref=".teamflow/AGENTS.md" hash="${sharedRulesHash}" />`
+			: "";
 
 		const xml = `<teamflow_context version="1">
-  <context_manifest generated_at="${generatedAt}">${projectRulesSource}
+  <context_manifest generated_at="${generatedAt}">${projectRulesSource}${sharedRulesSource}
     <source kind="rule_cache" ref="${ruleCacheRef}" hash="${visibleCache.contentHash}" />
-  </context_manifest>${projectRulesSection}
+  </context_manifest>${projectRulesSection}${sharedRulesSection}
   ${ruleCacheXml}
 </teamflow_context>`;
 
@@ -381,6 +406,7 @@ export default function (pi: ExtensionAPI) {
 				details: {
 					sources: [
 						...(injectProjectRules ? [{ kind: "project_rules", ref: "AGENTS.md", hash: rulesHash }] : []),
+						...(injectSharedRules ? [{ kind: "shared_rules", ref: ".teamflow/AGENTS.md", hash: sharedRulesHash }] : []),
 						{ kind: "rule_cache", ref: ruleCacheRef, hash: visibleCache.contentHash },
 					],
 					generatedAt,
