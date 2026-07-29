@@ -36,7 +36,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 MEMORY_SCRIPT = ROOT / ".teamflow" / "bin" / "memory"
-INIT_PROJECT = ROOT / "scripts" / "init-project.sh"
+INIT_PROJECT = ROOT / "scripts" / "install"
 
 
 # The fake enforces the corrected real-CLI contract:

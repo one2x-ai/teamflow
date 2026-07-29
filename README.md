@@ -49,7 +49,7 @@ shell 环境变量优先级最高；业务项目的 `.teamflow/.env` 可作为�
 初始化本地跨项目记忆并检查模板：
 
 ```bash
-./scripts/setup-memory.sh
+./scripts/setup
 ./scripts/doctor.sh
 ```
 
@@ -58,13 +58,13 @@ shell 环境变量优先级最高；业务项目的 `.teamflow/.env` 可作为�
 先预览：
 
 ```bash
-./scripts/init-project.sh --dry-run /path/to/project
+./scripts/install --dry-run /path/to/project
 ```
 
 再安装：
 
 ```bash
-./scripts/init-project.sh /path/to/project
+./scripts/install /path/to/project
 cd /path/to/project
 teamflow
 ```
@@ -84,6 +84,21 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 - 用户修改过的受管文件不会被静默覆盖；`--force` 会先备份到 `~/.teamflow/backups/`。
 
 除 `.gitignore` 的标准目录规则外，安装前后业务仓库的 `git status --short` 应保持不变。
+
+## 卸载
+
+```bash
+./scripts/uninstall --dry-run                      # 预览
+./scripts/uninstall                                # 只清理全局命令
+./scripts/uninstall --project /path/to/project     # 同时清理该项目运行时
+./scripts/uninstall --project /path/to/project --memory  # 连本地记忆一起删除
+```
+
+默认只删除全局入口 `~/.local/bin/teamflow`，且仅当该文件带有 teamflow 标记时才动手，不会误删同名的第三方命令。
+
+`--project` 会删除该项目的 `.teamflow/` 目录，并只移除安装器写入的 `.teamflow/` 忽略规则与其说明行，业务项目自己的 `.gitignore` 规则完整保留。
+
+`--memory` 才会删除 `~/.teamflow/memory/`。跨项目记忆是用户知识，不加该参数永不删除。
 
 ## 目标项目布局
 
@@ -143,7 +158,7 @@ Phase B 冷记忆持久化已接入运行时：每轮 `agent_settled` 时，扩�
 
 Phase C 可见 XML 上下文注入已接入：`pi-runtime run` 现在在 argv 中传递 `--no-context-files`，Pi 不再自动把 AGENTS.md/CLAUDE.md 拼入系统提示；改为由扩展的 `before_agent_start` 返回一条 `display: true` 的可见 XML 自定义消息（customType 为 `teamflow:context`），同时参与 LLM 上下文与 UI 展示。该 XML 以 `<teamflow_context>` 包裹，内含 `<context_manifest>` 清单列出每个来源的 `kind` 与 `hash`（当前为 `kind="project_rules"`、`ref="AGENTS.md"`、`hash="sha256:..."`），项目规则文件内容经 XML 转义后放入 `<project_rules>` 段。不存在隐藏的 `systemPrompt` 字符串拼接。
 
-Phase D 热区接管与 no-compact 已接入：扩展注册 `context` hook，对即将发送给 LLM 的会话消息深拷贝执行热区投影——保留最新的 `teamflow:context` 项目规则消息、最近一个已完成轮（latest completed turn）与当前活动轮（active turn）；更早的轮次从投影中逐出（evicted），但不生成任何替代文本，完整 TurnBlock 仍在 FileColdStore 中可精确召回；投影边界不会拆散 tool call / tool result 因果对（首个保留消息为 toolResult 时会回退纳入其匹配的 assistant toolCall）。`session_before_compact` 对所有 reason（manual/threshold/overflow）返回 `{ cancel: true }` 并追加 `teamflow:compact_intercepted` 回执；若 `session_compact` 仍触发，则追加 `teamflow:compact_violation` 不变量违例回执。`.teamflow/settings.json` 同时声明 `compaction.enabled=false`，由 `init-project.sh` 随目标项目分发、`doctor.sh` 校验。当受保护上下文超出模型预算（remaining < 0）时，扩展追加 `CONTEXT_BUDGET_EXCEEDED` 结构化失败回执（含 limit/used/remaining 证据，`requiredAction: "REPLAN_AND_SPLIT"`），而不是 compact-and-retry。
+Phase D 热区接管与 no-compact 已接入：扩展注册 `context` hook，对即将发送给 LLM 的会话消息深拷贝执行热区投影——保留最新的 `teamflow:context` 项目规则消息、最近一个已完成轮（latest completed turn）与当前活动轮（active turn）；更早的轮次从投影中逐出（evicted），但不生成任何替代文本，完整 TurnBlock 仍在 FileColdStore 中可精确召回；投影边界不会拆散 tool call / tool result 因果对（首个保留消息为 toolResult 时会回退纳入其匹配的 assistant toolCall）。`session_before_compact` 对所有 reason（manual/threshold/overflow）返回 `{ cancel: true }` 并追加 `teamflow:compact_intercepted` 回执；若 `session_compact` 仍触发，则追加 `teamflow:compact_violation` 不变量违例回执。`.teamflow/settings.json` 同时声明 `compaction.enabled=false`，由 `scripts/install` 随目标项目分发、`doctor.sh` 校验。当受保护上下文超出模型预算（remaining < 0）时，扩展追加 `CONTEXT_BUDGET_EXCEEDED` 结构化失败回执（含 limit/used/remaining 证据，`requiredAction: "REPLAN_AND_SPLIT"`），而不是 compact-and-retry。
 
 Phase E 准则 cache（rule cache）已接入：`rule-cache.ts` 定义受保护的准则层 schema（Rule/RuleCache/MemoryDelta）、规范 XML 序列化（固定属性顺序、实体转义、SHA-256 content hash，hash 输入排除 content_hash 字段）以及 `<memory_delta>` 增量格式（assert / supersede / retire）和 `validateDelta()` 结构完整性校验；`rule-cache-reducer.ts` 实现权限感知的纯函数增量 reducer `applyDelta()`——未被提及的规则永不删除，低权限来源（rank：repository/system_policy 5 > user 4 > planner 3 > tool_evidence 2 > candidate 1）不能覆盖/supersede/retire 高权限规则，推断内容只能以 `candidate` 状态进入，tool_evidence 必须引用原始事件，supersede/retire 保留旧规则仅供审计。扩展在 `before_agent_start` 把当前准则 cache（仅 active/candidate 规则）作为可见 `<rule_cache>` XML 段注入 teamflow_context，并在 context_manifest 中登记 `kind="rule_cache"` 来源；`agent_settled` 仅在本轮 teamflow_result 非截断（finish=length 拒绝）、状态为 PASS 且 memory_delta 通过结构校验时才应用 delta 并以 `teamflow:rule_cache` 自定义条目持久化新 cache；`session_start` 恢复最新持久化条目前先验证规范 content hash。准则 cache 不写入 Basic Memory knowledge 目录。
 
@@ -290,7 +305,7 @@ teamflow memory-capture --receipt .teamflow/runs/task-receipts/<run-id>/receipt.
 
 `test-writer` 采用产物优先的检查点：完成一次聚焦代码检查和一次代表性测试惯例检查后，先写 `tests.patch`，再继续校验和精炼。Planner 会在委派返回后独立检查该补丁；`finish=length` 或缺少强制产物会将当前 phase 明确结束为 `BLOCKED`，不会把空返回当成功或在同一 phase 内静默重试。
 
-`teamflow server` 的实现是 Bun + TypeScript，源码位于仓库根目录 `server/`（"实现集中在 `.teamflow/`" 原则的唯一文档化例外）；`scripts/init-project.sh` 会把它安装到目标项目的 `.teamflow/server/` 下。服务使用 `Bun.serve`，运行时只依赖 Bun 内置与标准 API（零 npm 运行时依赖），并通过 `--local` 调用本机已有的 `basic-memory` CLI 读取记忆；不使用 MCP、云同步、账号或密钥。开发期类型检查：`cd server && bun install && bun run typecheck`。
+`teamflow server` 的实现是 Bun + TypeScript，源码位于仓库根目录 `server/`（"实现集中在 `.teamflow/`" 原则的唯一文档化例外）；`scripts/install` 会把它安装到目标项目的 `.teamflow/server/` 下。服务使用 `Bun.serve`，运行时只依赖 Bun 内置与标准 API（零 npm 运行时依赖），并通过 `--local` 调用本机已有的 `basic-memory` CLI 读取记忆；不使用 MCP、云同步、账号或密钥。开发期类型检查：`cd server && bun install && bun run typecheck`。
 
 可配置项：
 
@@ -317,7 +332,7 @@ teamflow debug skill
 更新 Basic Memory 官方 Skills 的 CLI-only 适配：
 
 ```bash
-./scripts/update-basic-memory-skills.sh \
+./scripts/update \
   --ref main \
   --instruction "保留新增的本地知识图谱能力，继续禁止云端与 MCP"
 ```
@@ -337,11 +352,13 @@ teamflow debug skill
 │   └── bin/
 ├── server/                # Bun + TypeScript 只读记忆浏览服务源码（仓库级例外）
 └── scripts/
-    ├── bootstrap.sh
-    ├── doctor.sh
-    ├── init-project.sh
-    ├── setup-memory.sh
-    ├── update-basic-memory-skills.sh
+    ├── bootstrap.sh       # 安装运行时与全局入口
+    ├── doctor.sh          # 环境与安装诊断
+    ├── install            # 安装 .teamflow/ 到业务项目
+    ├── uninstall          # 清理全局命令、项目运行时与（可选）记忆数据
+    ├── setup              # 初始化本地跨项目记忆
+    ├── update             # 刷新 Basic Memory 官方 Skills 的 CLI-only 适配
+    ├── clean              # 清理 .teamflow/runs/ 下的一次性原始输出
     └── teamflow           # 全局入口模板
 ```
 

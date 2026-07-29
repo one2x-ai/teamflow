@@ -83,7 +83,7 @@ INDEXER_AGENT_FILE = ROOT / ".teamflow" / "agents" / "memory-indexer.md"
 README_FILE = ROOT / "README.md"
 DESIGN_DOC = ROOT / "docs" / "teamflow-memory-context-design.md"
 DOCTOR_FILE = ROOT / "scripts" / "doctor.sh"
-INIT_FILE = ROOT / "scripts" / "init-project.sh"
+INIT_FILE = ROOT / "scripts" / "install"
 
 TURN_INDEX_ABS = str(TURN_INDEX_FILE)
 FILE_COLD_STORE_ABS = str(FILE_COLD_STORE_FILE)

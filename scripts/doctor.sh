@@ -90,12 +90,12 @@ if command -v basic-memory >/dev/null 2>&1; then
        });'; then
     pass "local Basic Memory project $MEMORY_PROJECT_NAME is ready"
   else
-    fail "local Basic Memory is not initialized; run ./scripts/setup-memory.sh"
+    fail "local Basic Memory is not initialized; run ./scripts/setup"
   fi
   if [[ -d "$BASIC_MEMORY_HOME" && -f "$BASIC_MEMORY_CONFIG_DIR/config.json" ]]; then
     pass "Basic Memory shared store is under $MEMORY_ROOT"
   else
-    fail "shared Basic Memory paths are missing; run ./scripts/setup-memory.sh"
+    fail "shared Basic Memory paths are missing; run ./scripts/setup"
   fi
 else
   fail "basic-memory is not installed; run ./scripts/bootstrap.sh"

@@ -103,4 +103,4 @@ fi
 
 echo "Pi $(pi --version) is available."
 echo "$(basic-memory --version) is available."
-echo "Next: edit .env, run setup-memory.sh and doctor.sh, then init-project.sh <target-project>."
+echo "Next: edit .env, run ./scripts/setup and ./scripts/doctor.sh, then ./scripts/install <target-project>."

@@ -31,11 +31,11 @@ SCRIPTS = ROOT / "scripts"
 AGENTS_MD = ROOT / "AGENTS.md"
 README_MD = ROOT / "README.md"
 BOOTSTRAP = SCRIPTS / "bootstrap.sh"
-SETUP_MEMORY = SCRIPTS / "setup-memory.sh"
-INIT_PROJECT = SCRIPTS / "init-project.sh"
+SETUP_MEMORY = SCRIPTS / "setup"
+INIT_PROJECT = SCRIPTS / "install"
 DOCTOR = SCRIPTS / "doctor.sh"
 TEAMFLOW_CLI = ROOT / ".teamflow" / "bin" / "teamflow"
-PRUNE_RUNS = SCRIPTS / "teamflow-prune-runs"
+PRUNE_RUNS = SCRIPTS / "clean"
 
 LEGACY_ENV_TOKENS = (
     "WORKFLOW_HOME",
@@ -153,7 +153,7 @@ class ExperimentsRemainInstalledAndCheckedTests(unittest.TestCase):
 
 
 class RunRetentionHelperTests(unittest.TestCase):
-    """F: teamflow-prune-runs deletes only raw runs scratch, preserving artifacts."""
+    """F: clean deletes only raw runs scratch, preserving artifacts."""
 
     def _make_tree(self, root: Path) -> dict[str, Path]:
         runs = root / ".teamflow" / "runs"
@@ -202,8 +202,8 @@ class RunRetentionHelperTests(unittest.TestCase):
         return keep
 
     def test_helper_exists_and_is_executable(self):
-        self.assertTrue(PRUNE_RUNS.is_file(), "scripts/teamflow-prune-runs must exist")
-        self.assertTrue(os.access(PRUNE_RUNS, os.X_OK), "scripts/teamflow-prune-runs must be executable")
+        self.assertTrue(PRUNE_RUNS.is_file(), "scripts/clean must exist")
+        self.assertTrue(os.access(PRUNE_RUNS, os.X_OK), "scripts/clean must be executable")
 
     def test_dry_run_deletes_nothing(self):
         self.assertTrue(PRUNE_RUNS.is_file())

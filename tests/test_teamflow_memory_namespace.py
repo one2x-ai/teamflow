@@ -6,7 +6,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SETUP_MEMORY = ROOT / "scripts/setup-memory.sh"
+SETUP_MEMORY = ROOT / "scripts/setup"
 
 
 def write_fake_basic_memory(bin_dir: Path) -> Path:

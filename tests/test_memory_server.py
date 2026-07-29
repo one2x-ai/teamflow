@@ -541,7 +541,7 @@ class MemoryServerInstallerTests(unittest.TestCase):
                 }
             )
             completed = subprocess.run(
-                [str(ROOT / "scripts/init-project.sh"), str(project)],
+                [str(ROOT / "scripts/install"), str(project)],
                 cwd=ROOT,
                 env=env,
                 text=True,

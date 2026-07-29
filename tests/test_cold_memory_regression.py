@@ -552,35 +552,33 @@ class FileColdStoreBehavioralTests(unittest.TestCase):
 
 
 class MigrationScriptTests(unittest.TestCase):
-    """Verify scripts/migrate-cold-store.sh exists and is safe."""
+    """The one-off cold-store migration is retired.
 
-    def test_migration_script_exists(self):
-        self.assertTrue(
-            MIGRATE_SCRIPT.is_file(),
-            "scripts/migrate-cold-store.sh must exist",
+    The defect it repaired (raw XML turns written under knowledge/ by the
+    pre-rename adapter) is fixed in file-cold-store, which writes only to
+    state/cold-store/. The migration script is therefore removed rather
+    than kept as permanent surface. The invariant it protected is still
+    asserted by ColdStoreRootTests.test_default_root_not_in_knowledge and
+    FileColdStoreBehavioralTests.test_writes_to_cold_store_not_knowledge
+    in this module.
+    """
+
+    def test_migration_script_is_removed(self):
+        self.assertFalse(
+            MIGRATE_SCRIPT.exists(),
+            "the one-off scripts/migrate-cold-store.sh must be removed",
         )
 
-    def test_migration_script_has_shebang(self):
-        text = MIGRATE_SCRIPT.read_text(encoding="utf-8")
-        self.assertTrue(
-            text.startswith("#!"),
-            "migration script must start with a shebang",
-        )
-
-    def test_migration_script_no_unconditional_delete(self):
-        text = MIGRATE_SCRIPT.read_text(encoding="utf-8")
-        self.assertNotIn(
-            "rm -rf",
-            text,
-            "migration script must not contain 'rm -rf'",
-        )
-
-    def test_migration_script_has_backup_logic(self):
-        text = MIGRATE_SCRIPT.read_text(encoding="utf-8")
-        self.assertTrue(
-            "backup" in text or "tar" in text or "cp " in text,
-            "migration script must include backup logic",
-        )
+    def test_no_script_references_cold_store_migration(self):
+        scripts_dir = ROOT / "scripts"
+        for path in sorted(scripts_dir.iterdir()):
+            if not path.is_file():
+                continue
+            with self.subTest(script=path.name):
+                self.assertNotIn(
+                    "migrate-cold-store",
+                    path.read_text(encoding="utf-8"),
+                )
 
 
 # --------------------------------------------------------------------

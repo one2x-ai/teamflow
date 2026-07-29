@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INITIALIZER = ROOT / "scripts" / "init-project.sh"
+INITIALIZER = ROOT / "scripts" / "install"
 RUNTIME = ROOT / ".teamflow" / "bin" / "pi-runtime"
 WRAPPER = ROOT / ".teamflow" / "bin" / "teamflow"
 

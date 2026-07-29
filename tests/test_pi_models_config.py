@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MODELS_PATH = ROOT / ".teamflow" / "models.json"
 AGENTS_DIR = ROOT / ".teamflow" / "agents"
-INIT_SCRIPT = ROOT / "scripts" / "init-project.sh"
+INIT_SCRIPT = ROOT / "scripts" / "install"
 
 # Mirror tests/test_pi_wrapper.py: a long base64-ish or hex run is treated as a
 # literal secret token and must never appear in models.json.
@@ -211,7 +211,7 @@ class InitProjectFilesListTests(unittest.TestCase):
     def test_files_list_includes_teamflow_models_json(self):
         match = re.search(r'\nFILES=\(\n(.*?)\n\)', self.script, re.DOTALL)
         self.assertIsNotNone(
-            match, "scripts/init-project.sh must define a FILES=(...) block"
+            match, "scripts/install must define a FILES=(...) block"
         )
         entries = [ln.strip() for ln in match.group(1).splitlines()]
         self.assertIn(
@@ -337,7 +337,7 @@ class _IsolatedTools:
 
     def initialize(self, project):
         return subprocess.run(
-            [str(ROOT / "scripts/init-project.sh"), str(project)],
+            [str(ROOT / "scripts/install"), str(project)],
             cwd=ROOT,
             env=self._base_env(),
             text=True,

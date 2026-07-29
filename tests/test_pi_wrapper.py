@@ -399,11 +399,11 @@ class InstallerFootprintTests(unittest.TestCase):
     """The installer ships the runtime files below ``.teamflow/`` only."""
 
     def setUp(self):
-        self.init_script = (ROOT / "scripts/init-project.sh").read_text(encoding="utf-8")
+        self.init_script = (ROOT / "scripts/install").read_text(encoding="utf-8")
 
     def test_files_list_includes_new_runtime_artifacts(self):
         match = re.search(r'\nFILES=\(\n(.*?)\n\)', self.init_script, re.DOTALL)
-        self.assertIsNotNone(match, "scripts/init-project.sh must define a FILES=(...) block")
+        self.assertIsNotNone(match, "scripts/install must define a FILES=(...) block")
         block = match.group(1)
         self.assertIn(".teamflow/bin/pi-runtime", block)
 
@@ -510,7 +510,7 @@ class _IsolatedTools:
 
     def initialize(self, project):
         return subprocess.run(
-            [str(ROOT / "scripts/init-project.sh"), str(project)],
+            [str(ROOT / "scripts/install"), str(project)],
             cwd=ROOT,
             env=self._base_env(),
             text=True,
