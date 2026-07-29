@@ -74,11 +74,12 @@ Basic Memory is the fully local shared memory backend. This repository contains 
 
 ## Maintaining this repository
 
-When changing Agent models, permissions, Teamflow phase order, environment variables, or scripts:
+When changing Agent models, permissions, Teamflow phase order, environment variables, frontmatter contracts, or scripts:
 
 1. Update the implementation.
 2. Update README usage and architecture notes.
-3. Run `./scripts/doctor.sh`.
-4. Confirm all project Agents and Skills appear in `teamflow debug` output.
-5. Dry-run `./scripts/init-project.sh` against a disposable Git project when installable files change.
-6. Keep the four Basic Memory Skills CLI-only; use `./scripts/update-basic-memory-skills.sh` to prepare upstream refreshes.
+3. Update `.teamflow/AGENTS.md` shared constraints when frontmatter contracts change.
+4. Run `./scripts/doctor.sh`.
+5. Confirm all project Agents and Skills appear in `teamflow debug` output.
+6. Dry-run `./scripts/init-project.sh` against a disposable Git project when installable files change.
+7. Keep the four Basic Memory Skills CLI-only; use `./scripts/update-basic-memory-skills.sh` to prepare upstream refreshes.

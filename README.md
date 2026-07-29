@@ -96,7 +96,13 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 │   ├── planner.md
 │   ├── test-writer.md
 │   ├── test-runner.md
-│   └── coder.md
+│   ├── coder.md
+│   ├── command.md
+│   ├── emotional-salience-sensor.md
+│   ├── memory-compressor.md
+│   ├── memory-extractor.md
+│   ├── memory-formatter.md
+│   └── memory-indexer.md
 ├── skills/
 ├── bin/                      # 仅正式流程入口
 │   ├── teamflow              # 项目内入口
@@ -126,7 +132,7 @@ teamflow debug skill                        # 列出项目 .teamflow/skills/ 中
 teamflow session list --format json         # 仅输出会话元数据（id/model/provider/时间/message_count）
 ```
 
-角色身份由 `agents/<role>.md` 的 Markdown frontmatter 唯一确定：`model`（`<provider>/<model>`）映射到 provider 与模型，文件正文即系统提示；`test-runner` 通过 frontmatter 的 `tools` 排除 edit 保持只读。Pi 会从 `PI_CODING_AGENT_DIR=.teamflow` 自动追加 `.teamflow/AGENTS.md`，并继续追加业务项目根目录已有的 `AGENTS.md`；运行器不再显式追加同一文件，避免重复注入。会话目录默认读取 `TEAMFLOW_PI_SESSION_DIR`，未设置时回退到 `$PI_CODING_AGENT_DIR/sessions`。
+角色身份由 `agents/<role>.md` 的 Markdown frontmatter 唯一确定：`model`（`<provider>/<model>`）映射到 provider 与模型，文件正文即系统提示；`test-runner` 通过 frontmatter 的 `tools` 排除 edit 保持只读。`pi-runtime` 传递 `--no-context-files`，Pi 不再自动拼接 AGENTS.md；改为由 `memory-context` 扩展在 `before_agent_start` 时读取项目根目录 `AGENTS.md` 并以可见 XML 消息注入（见 Phase C）。声明 `needs_project_rules: false` 的角色（如 `test-runner`、`command`）跳过 AGENTS.md 注入以节省 token。会话目录默认读取 `TEAMFLOW_PI_SESSION_DIR`，未设置时回退到 `$PI_CODING_AGENT_DIR/sessions`。
 
 `pi-runtime run` 会通过 `--extension` 加载 `.teamflow/extensions/teamflow-task/index.ts` 并导出 `TEAMFLOW_AGENT_ROLE`/`TEAMFLOW_AGENT_DEPTH=0`。角色只有在 Markdown frontmatter 中以严格布尔值声明 `delegates: true` 且运行深度为 0 时，才会注册 `task(agent, prompt)` 与 `task_group`；缺失、`false` 或字符串形式的值都不授权。扩展按文件名在 `.teamflow/agents/` 中解析角色 Markdown，用 frontmatter 的 `model`（`<provider>/<model>`）与可选 `tools` 启动隔离的 pi 子进程（JSON 模式），子进程环境为 `TEAMFLOW_AGENT_ROLE=<role>`、`TEAMFLOW_AGENT_DEPTH=1`，因此子角色即使带有同一声明也不能继续委派。未知角色、非零退出、取消以及 `stopReason` 为 `error`/`aborted`/`length` 时显式失败。
 
@@ -164,6 +170,8 @@ Phase G 规划反馈（planning feedback）已实现：预算超限时 `phase_st
 - 智谱 GLM Coding Plan：`https://open.bigmodel.cn/api/coding/paas/v4`
 
 底层由 Pi runtime 读取 `.teamflow/models.json` 和 Agent Markdown frontmatter，角色解析不依赖额外兼容配置。
+
+Agent frontmatter 支持的字段：`description`（必需）、`model`（必需，`<provider>/<model>`）、`tools`（可选，逗号分隔工具列表）、`delegates`（可选，严格布尔值 `true` 时授权 `task`/`task_group`）、`needs_project_rules`（可选，`false` 时跳过 AGENTS.md 注入，适用于纯执行角色如 `test-runner`、`command`）。
 
 明确的命令式任务不启动 GLM planner 与 K3 coder，直接使用快速命令模式：
 

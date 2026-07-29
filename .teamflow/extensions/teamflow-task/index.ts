@@ -58,14 +58,20 @@ function listAvailableRoles(): string {
 	return roles.length > 0 ? roles.join(", ") : "none";
 }
 
+const delegatesCache = new Map<string, boolean>();
+
 function roleMayDelegate(role: string | undefined, depth: number): boolean {
 	if (!role || depth !== 0 || !ROLE_NAME_PATTERN.test(role)) return false;
+	const cached = delegatesCache.get(role);
+	if (cached !== undefined) return cached;
 	const agentPath = path.join(AGENTS_DIR, `${role}.md`);
 	if (!fs.existsSync(agentPath)) return false;
 	const { frontmatter } = parseFrontmatter<Record<string, unknown>>(
 		fs.readFileSync(agentPath, "utf-8"),
 	);
-	return frontmatter.delegates === true;
+	const result = frontmatter.delegates === true;
+	delegatesCache.set(role, result);
+	return result;
 }
 
 function getPiInvocation(args: string[]): { command: string; args: string[] } {

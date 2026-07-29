@@ -11,6 +11,8 @@ This working repository uses Teamflow's test-first multi-agent process.
 - `command` uses MiMo 2.5 Pro for explicit shell, Git, and GitHub operations that require no code edits or multi-agent planning.
 - `emotional-salience-sensor`, `memory-compressor`, `memory-extractor`, and `memory-formatter` form the serial capture pipeline; GLM-5.2 owns both extraction and final formatting. Models write only below `.teamflow/runs/memory/`; deterministic apply writes safe new notes and defers update/supersede proposals.
 
+Only depth-0 roles with the strict boolean frontmatter declaration `delegates: true` may receive `task` and `task_group`. Child roles always run at depth 1 and may never delegate further. Roles that declare `needs_project_rules: false` (such as `test-runner` and `command`) skip AGENTS.md injection; they receive only their own system prompt and the handoff message.
+
 ## Required sequence
 
 Use this sequence unless the task is documentation-only or cannot be tested:

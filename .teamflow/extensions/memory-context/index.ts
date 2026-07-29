@@ -68,7 +68,8 @@ import { createHash } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import * as os from "node:os";
-import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { fileURLToPath } from "node:url";
+import { type ExtensionAPI, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { computeContentHash, redactSecrets } from "./turn-block";
 import type { TurnBlock, TurnMessage } from "./turn-block";
 import type { ColdMemoryStore } from "./cold-memory-store";
@@ -94,6 +95,8 @@ const CONTEXT_BUDGET_EXCEEDED = "CONTEXT_BUDGET_EXCEEDED";
 const RECALL_BUDGET_EXCEEDED_TYPE = "teamflow:recall_budget_exceeded";
 const RECALL_BUDGET_EXCEEDED = "RECALL_BUDGET_EXCEEDED";
 const RULE_CACHE_CUSTOM_TYPE = "teamflow:rule_cache";
+
+const AGENTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
 
 interface ObservationReceipt {
 	version: number;
@@ -234,6 +237,30 @@ function extractMessages(entries: unknown[]): TurnMessage[] {
 	return messages;
 }
 
+// Check whether the current role needs the full AGENTS.md project rules
+// injected. Roles that are pure executors (test-runner, command) declare
+// needs_project_rules: false in frontmatter to skip the injection and
+// save tokens. Default is true for backward compatibility.
+const needsProjectRulesCache = new Map<string, boolean>();
+
+function roleNeedsProjectRules(role: string | undefined): boolean {
+	if (!role) return true;
+	const cached = needsProjectRulesCache.get(role);
+	if (cached !== undefined) return cached;
+	const agentPath = path.join(AGENTS_DIR, `${role}.md`);
+	if (!fs.existsSync(agentPath)) return true;
+	try {
+		const { frontmatter } = parseFrontmatter<Record<string, unknown>>(
+			fs.readFileSync(agentPath, "utf-8"),
+		);
+		const result = frontmatter.needs_project_rules !== false;
+		needsProjectRulesCache.set(role, result);
+		return result;
+	} catch {
+		return true;
+	}
+}
+
 export default function (pi: ExtensionAPI) {
 	// Per-session state, sealed one turn at a time.
 	let turnIndex = 0;
@@ -298,14 +325,20 @@ export default function (pi: ExtensionAPI) {
 		// project rules. Pi is launched with --no-context-files, so
 		// AGENTS.md is read explicitly here instead of being hidden in
 		// the system prompt. A missing AGENTS.md yields an empty
-		// project_rules section rather than an error.
+		// project_rules section rather than an error. Roles that declare
+		// needs_project_rules: false skip the AGENTS.md content entirely
+		// to save tokens (they still receive the rule_cache section).
 		const cwd = event.systemPromptOptions?.cwd || process.cwd();
 		currentCwd = cwd;
+		const agentRole = process.env.TEAMFLOW_AGENT_ROLE;
+		const injectProjectRules = roleNeedsProjectRules(agentRole);
 		let rulesContent = "";
-		try {
-			rulesContent = fs.readFileSync(path.join(cwd, "AGENTS.md"), "utf-8");
-		} catch {
-			// AGENTS.md not found — project_rules section will be empty.
+		if (injectProjectRules) {
+			try {
+				rulesContent = fs.readFileSync(path.join(cwd, "AGENTS.md"), "utf-8");
+			} catch {
+				// AGENTS.md not found — project_rules section will be empty.
+			}
 		}
 		const rulesHash = "sha256:" + createHash("sha256").update(rulesContent).digest("hex");
 		const generatedAt = new Date().toISOString();
@@ -326,14 +359,17 @@ export default function (pi: ExtensionAPI) {
 		const ruleCacheRef = `cache://${visibleCache.taskId}`;
 		const ruleCacheXml = serializeRuleCache(visibleCache).replace(/\n/g, "\n  ");
 
+		const projectRulesSection = injectProjectRules
+			? `\n  <project_rules>\n${escapeXmlContent(rulesContent)}\n  </project_rules>`
+			: "";
+		const projectRulesSource = injectProjectRules
+			? `\n    <source kind="project_rules" ref="AGENTS.md" hash="${rulesHash}" />`
+			: "";
+
 		const xml = `<teamflow_context version="1">
-  <context_manifest generated_at="${generatedAt}">
-    <source kind="project_rules" ref="AGENTS.md" hash="${rulesHash}" />
+  <context_manifest generated_at="${generatedAt}">${projectRulesSource}
     <source kind="rule_cache" ref="${ruleCacheRef}" hash="${visibleCache.contentHash}" />
-  </context_manifest>
-  <project_rules>
-${escapeXmlContent(rulesContent)}
-  </project_rules>
+  </context_manifest>${projectRulesSection}
   ${ruleCacheXml}
 </teamflow_context>`;
 
@@ -344,7 +380,7 @@ ${escapeXmlContent(rulesContent)}
 				display: true,
 				details: {
 					sources: [
-						{ kind: "project_rules", ref: "AGENTS.md", hash: rulesHash },
+						...(injectProjectRules ? [{ kind: "project_rules", ref: "AGENTS.md", hash: rulesHash }] : []),
 						{ kind: "rule_cache", ref: ruleCacheRef, hash: visibleCache.contentHash },
 					],
 					generatedAt,

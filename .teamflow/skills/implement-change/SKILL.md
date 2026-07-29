@@ -12,6 +12,4 @@ description: Implement an approved software change against prewritten acceptance
 5. Run the focused tests, then relevant lint, typecheck, regression, and build commands.
 6. Run `teamflow source-check` to reject non-printing control bytes, then run `teamflow test-patch verify <path>` after implementation. Inspect the diff for unrelated edits and report files, commands, results, assumptions, and risks.
 
-Do not modify or weaken acceptance tests. If the test and handoff disagree, stop and return the conflict to the planner.
-
-Never paste literal terminal control bytes into source or shell commands. Use language escape syntax for NUL, ESC, DEL, and other non-printing characters.
+If the test and handoff disagree, stop and return the conflict to the planner.

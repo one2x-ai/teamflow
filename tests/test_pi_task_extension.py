@@ -137,6 +137,11 @@ class ExtensionFileTests(unittest.TestCase):
             "extension must handle abort/cancellation",
         )
 
+    def test_delegates_cache_exists(self):
+        """Extension must cache the delegates frontmatter parse result."""
+        text = EXTENSION_FILE.read_text(encoding="utf-8")
+        self.assertIn("delegatesCache", text)
+
 
 class PiRuntimeDepthEnvTests(unittest.TestCase):
     """Contract 4: pi-runtime exports role/depth env and passes --extension."""

@@ -149,7 +149,7 @@ class ReadmeNoLegacyReferencesTests(unittest.TestCase):
 class AgentFrontmatterTests(unittest.TestCase):
     """AC2: every agent .md frontmatter has only the allowed keys."""
 
-    ALLOWED_KEYS = {"description", "model", "tools", "delegates"}
+    ALLOWED_KEYS = {"description", "model", "tools", "delegates", "needs_project_rules"}
     FORBIDDEN_KEYS = {"mode", "permission", "temperature", "steps"}
 
     def _agent_files(self):

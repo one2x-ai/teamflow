@@ -182,6 +182,55 @@ class BeforeAgentStartMessageTests(unittest.TestCase):
 
 
 # --------------------------------------------------------------------
+# Role-aware project rules injection (needs_project_rules frontmatter)
+# --------------------------------------------------------------------
+
+
+class RoleAwareProjectRulesTests(unittest.TestCase):
+    """Roles with needs_project_rules: false skip AGENTS.md injection."""
+
+    def setUp(self):
+        self.text = (
+            EXTENSION_FILE.read_text(encoding="utf-8")
+            if EXTENSION_FILE.is_file()
+            else ""
+        )
+
+    def test_extension_reads_needs_project_rules(self):
+        """Extension must parse needs_project_rules from agent frontmatter."""
+        self.assertIn("needs_project_rules", self.text)
+
+    def test_extension_has_role_aware_gate(self):
+        """Extension must have a function that checks role frontmatter."""
+        self.assertIn("roleNeedsProjectRules", self.text)
+
+    def test_extension_caches_needs_project_rules(self):
+        """Extension must cache the frontmatter parse result."""
+        self.assertIn("needsProjectRulesCache", self.text)
+
+    def test_test_runner_has_needs_project_rules_false(self):
+        """test-runner.md must declare needs_project_rules: false."""
+        agent = (
+            ROOT / ".teamflow" / "agents" / "test-runner.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("needs_project_rules: false", agent)
+
+    def test_command_has_needs_project_rules_false(self):
+        """command.md must declare needs_project_rules: false."""
+        agent = (
+            ROOT / ".teamflow" / "agents" / "command.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("needs_project_rules: false", agent)
+
+    def test_planner_does_not_have_needs_project_rules_false(self):
+        """planner.md must NOT declare needs_project_rules: false."""
+        agent = (
+            ROOT / ".teamflow" / "agents" / "planner.md"
+        ).read_text(encoding="utf-8")
+        self.assertNotIn("needs_project_rules: false", agent)
+
+
+# --------------------------------------------------------------------
 # Phase C invariant (context/compact hooks added by Phase D)
 # --------------------------------------------------------------------
 
