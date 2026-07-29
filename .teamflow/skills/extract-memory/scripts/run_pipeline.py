@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import concurrent.futures
 import hashlib
 import json
 import os
@@ -84,6 +85,50 @@ def run_model(command: list[str], cwd: Path) -> subprocess.CompletedProcess[str]
             stdout, stderr = process.communicate()
         stderr += f"\nteamflow model stage timed out after {timeout_seconds}s\n"
         return subprocess.CompletedProcess(command, 124, stdout, stderr)
+
+
+def run_stage_group(
+    commands: dict[str, list[str]], cwd: Path
+) -> dict[str, subprocess.CompletedProcess[str]]:
+    """Run independent model stages concurrently and join on all of them.
+
+    Used for the emotion_detection + compression group: both read only
+    already-written inputs (05-emotion-input.json and the evidence capsule
+    plus its source files), so neither blocks on the other's output. Each
+    stage goes through run_model, so timeout, process-group kill, and
+    CompletedProcess semantics stay identical to serial execution and a
+    single seam remains for tests to intercept. Validation of the joined
+    results stays sequential and unchanged, so a failing emotion stage
+    still fails the whole run.
+    """
+    results: dict[str, subprocess.CompletedProcess[str]] = {}
+    with concurrent.futures.ThreadPoolExecutor(max_workers=len(commands)) as executor:
+        futures = {
+            name: executor.submit(run_model, command, cwd)
+            for name, command in commands.items()
+        }
+        for name, future in futures.items():
+            results[name] = future.result()
+    return results
+
+
+def build_compression_extra_inputs(
+    run_dir: Path, project_root: Path, emotion_output: Path
+) -> str:
+    """Extra prompt text for the compression stage.
+
+    The emotion artifact is optional: compression runs concurrently with
+    emotion detection, so 06-emotion-signals.json may not exist yet when
+    compression starts. When present it is attention metadata only; when
+    absent the compressor records the exclusion instead of blocking.
+    """
+    return (
+        " Read every source file listed in the capsule's sources[].path. Also read "
+        f"{emotion_output.relative_to(project_root)} if it exists — it runs concurrently and may not exist yet. "
+        "When present, use emotional salience only as attention metadata: preserve its target or record why it is "
+        "excluded, but never treat emotion as evidence or promote a claim solely because its intensity is high. "
+        "When absent, record 'emotion signals unavailable' in excluded and proceed from the capsule and sources alone."
+    )
 
 
 def validate_capture_receipt(value: object) -> list[str]:
@@ -707,13 +752,40 @@ def main() -> None:
         f"{emotion_output.relative_to(project_root)}. Treat each item id as an opaque source id. "
         "Do not read other files, ask the user questions, diagnose psychology, or write memory."
     )
-    emotion_result = run_model(
-        [str(teamflow), "run", "--agent", "emotional-salience-sensor", emotion_prompt], project_root
+    # Phase 2 parallelization: emotion_detection and compression read only
+    # inputs that already exist on disk (05-emotion-input.json for emotion;
+    # the evidence capsule plus its source files for compression), so the two
+    # model calls are launched concurrently and joined before validation.
+    # The compression prompt treats the emotion artifact as optional because
+    # it may not exist yet when compression starts.
+    compression_stage, compression_agent, compression_input_name, compression_output_name = STAGES[0]
+    compression_input_path = run_dir / compression_input_name
+    compression_output_path = run_dir / compression_output_name
+    compression_extra_inputs = build_compression_extra_inputs(run_dir, project_root, emotion_output)
+    compression_prompt = (
+        f"Load extract-memory and perform only the {compression_stage} stage. "
+        f"Read {compression_input_path.relative_to(project_root)} and write strict JSON to "
+        f"{compression_output_path.relative_to(project_root)}.{compression_extra_inputs} "
+        "Do not read other repository files, do not write Basic Memory, and do not include Markdown fences."
     )
+    group_results = run_stage_group(
+        {
+            "emotion_detection": [
+                str(teamflow), "run", "--agent", "emotional-salience-sensor", emotion_prompt,
+            ],
+            "compression": [
+                str(teamflow), "run", "--agent", compression_agent, compression_prompt,
+            ],
+        },
+        project_root,
+    )
+    emotion_result = group_results["emotion_detection"]
+    compression_result = group_results["compression"]
     manifest["stages"]["emotion_detection"] = {
         "agent": "emotional-salience-sensor",
         "exit_code": emotion_result.returncode,
         "output": emotion_output.name,
+        "parallel_group": ["emotion_detection", "compression"],
     }
     write_json(run_dir / "manifest.json", manifest)
     if emotion_result.returncode != 0 or not emotion_output.is_file():
@@ -782,12 +854,7 @@ def main() -> None:
         output_path = run_dir / output_name
         extra_inputs = ""
         if stage == "compression":
-            extra_inputs = (
-                " Read every source file listed in the capsule's sources[].path and also read "
-                f"{emotion_output.relative_to(project_root)} before writing the compression artifact. "
-                "Use emotional salience only as attention metadata: preserve its target or record why it is excluded, "
-                "but never treat emotion as evidence or promote a claim solely because its intensity is high."
-            )
+            extra_inputs = build_compression_extra_inputs(run_dir, project_root, emotion_output)
         if stage == "formatting":
             extra_inputs = (
                 f" Also read {(run_dir / '10-compressed.json').relative_to(project_root)} for evidence lineage "
@@ -799,8 +866,15 @@ def main() -> None:
             f"{output_path.relative_to(project_root)}.{extra_inputs} Do not read other repository files, "
             "do not write Basic Memory, and do not include Markdown fences."
         )
-        result = run_model([str(teamflow), "run", "--agent", agent, prompt], project_root)
+        # Compression already ran concurrently with emotion detection; reuse
+        # that joined result instead of spawning the model twice.
+        if stage == "compression":
+            result = compression_result
+        else:
+            result = run_model([str(teamflow), "run", "--agent", agent, prompt], project_root)
         manifest["stages"][stage] = {"agent": agent, "exit_code": result.returncode, "output": output_name}
+        if stage == "compression":
+            manifest["stages"][stage]["parallel_group"] = ["emotion_detection", "compression"]
         write_json(run_dir / "manifest.json", manifest)
         if result.returncode != 0:
             manifest["stages"][stage]["failure_kind"] = (

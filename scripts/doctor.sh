@@ -236,7 +236,7 @@ else
   fail ".teamflow/settings.json with compaction.enabled=false is missing"
 fi
 
-for agent in planner command coder test-writer test-runner emotional-salience-sensor memory-compressor memory-extractor memory-formatter memory-indexer; do
+for agent in planner command coder test-writer test-runner supervisor emotional-salience-sensor memory-compressor memory-extractor memory-formatter memory-indexer; do
   if HOME="$DOCTOR_HOME" ./.teamflow/bin/teamflow debug agent "$agent" >/dev/null 2>&1; then
     pass "agent $agent is discoverable"
   else

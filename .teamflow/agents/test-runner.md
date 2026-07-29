@@ -21,3 +21,5 @@ Execute the exact focused and regression commands in the handoff from a fresh pr
 `status` always reflects the command exit status: a nonzero RED command is `FAIL`, never `PASS`. When that failure is the intended test-first signal, add `expected_red: true` and explain why; this does not change `status` to PASS.
 
 For multiple commands, return one receipt per command followed by an overall status. Do not hide flaky or environment-dependent failures. Do not change a command merely to obtain a pass; report any required command correction to the planner.
+
+When the handoff arrives as a batch — a JSON array of `{"id", "cmd", "expect"}` entries — execute each command sequentially in this same process and return one receipt per command, keyed by its `id`, followed by the overall status. An entry whose `expect` is `FAIL` is the intended test-first signal: mark it `expected_red: true` without changing its `status` to PASS. The batch format never changes the per-command receipt schema above.

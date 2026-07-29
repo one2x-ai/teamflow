@@ -99,7 +99,14 @@ class PipelineFailureReceiptTests(unittest.TestCase):
 
             def fake_run_model(command, cwd):
                 prompt = command[-1]
-                match = re.search(r"(?:write|rewrite) strict contract JSON to (\S+\.json)", prompt)
+                # Emotion detection writes "strict contract JSON"; compression
+                # and later stages write "strict JSON". Both run through this
+                # seam because emotion and compression are launched in parallel.
+                match = re.search(
+                    r"(?:write|rewrite) (?:strict contract JSON|strict JSON|the full\s+strict JSON output)"
+                    r"(?: to)? (\S+\.json)",
+                    prompt,
+                )
                 assert match is not None, prompt
                 (cwd / match.group(1)).write_text("{}", encoding="utf-8")
                 return subprocess.CompletedProcess(
@@ -140,7 +147,11 @@ class PipelineFailureReceiptTests(unittest.TestCase):
 
             def fake_run_model(command, cwd):
                 prompt = command[-1]
-                match = re.search(r"(?:write|rewrite) strict contract JSON to (\S+\.json)", prompt)
+                match = re.search(
+                    r"(?:write|rewrite) (?:strict contract JSON|strict JSON|the full\s+strict JSON output)"
+                    r"(?: to)? (\S+\.json)",
+                    prompt,
+                )
                 (cwd / match.group(1)).write_text("{}", encoding="utf-8")
                 return subprocess.CompletedProcess(command, 0, "STDOUT-NOLEAK", "STDERR-NOLEAK")
 
@@ -159,7 +170,10 @@ class PipelineFailureReceiptTests(unittest.TestCase):
             run_dir = project / ".teamflow" / "runs" / "memory" / "demo"
             manifest = json.loads((run_dir / "manifest.json").read_text(encoding="utf-8"))
             emotion = manifest["stages"]["emotion_detection"]
-            allowed = {"agent", "exit_code", "output", "repair_exit_code", "repair_status", "failure_kind"}
+            allowed = {
+                "agent", "exit_code", "output", "repair_exit_code",
+                "repair_status", "failure_kind", "parallel_group",
+            }
             self.assertLessEqual(set(emotion), allowed, emotion)
             self.assertIn("failure_kind", emotion)
             self.assertTrue(emotion["failure_kind"], "failure_kind must be a non-empty classified kind")

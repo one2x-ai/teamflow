@@ -98,6 +98,7 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 │   ├── test-runner.md
 │   ├── coder.md
 │   ├── command.md
+│   ├── supervisor.md
 │   ├── emotional-salience-sensor.md
 │   ├── memory-compressor.md
 │   ├── memory-extractor.md
@@ -159,6 +160,7 @@ Phase G 规划反馈（planning feedback）已实现：预算超限时 `phase_st
 | `test-runner` | MiMo 2.5 Pro | 只执行测试并返回结构化错误回执；禁止修改文件 |
 | `coder` | Kimi K3 | 专注修改代码、构建和测试；禁止危险 Git 操作 |
 | `command` | MiMo 2.5 Pro | 快速执行明确的 Shell、Git、GitHub 操作；禁止修改代码和启动子 Agent |
+| `supervisor` | MiMo 2.5 Pro | 机械性校验（artifact 存在性、checksum、test-patch 门禁）；禁止编辑和委派 |
 
 记忆候选生成使用四个隔离阶段：`emotional-salience-sensor`（MiMo 2.5 Pro）探测可观察信号与记忆显著性，`memory-compressor`（DeepSeek V4 Pro）压缩原始长记忆，`memory-extractor`（GLM-5.2）发现概念与经验，`memory-formatter`（GLM-5.2）生成原子化候选。正式 formatter 固定使用 GLM-5.2，作为稳定输出骨架；其他模型只通过实验目录临时对比。Emotion 只提供注意力元数据，不进行心理诊断、不主动追问，也不能作为事实证据或直接写入记忆。
 
