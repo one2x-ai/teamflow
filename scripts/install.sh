@@ -137,20 +137,48 @@ for relative_path in "${FILES[@]}"; do
   cp -p "$source_path" "$destination_path"
 done
 
-# Remove the previous managed location only when it is still byte-for-byte the
-# file recorded by the prior manifest. User-modified files are preserved.
-retired_context=".teamflow/instructions/AGENTS.md"
-retired_path="$TARGET_ROOT/$retired_context"
-if [[ -f "$retired_path" ]]; then
-  previous_hash="$(manifest_hash "$retired_context")"
-  current_hash="$(sha256_file "$retired_path")"
-  if [[ -n "$previous_hash" && "$previous_hash" == "$current_hash" ]]; then
-    unlink "$retired_path"
-    rmdir "$TARGET_ROOT/.teamflow/instructions" 2>/dev/null || true
-  else
-    echo "warning: preserving user-modified retired context: $retired_context" >&2
+# Prune orphans: files the previous manifest managed that the current
+# template no longer ships. Delete one only when it is still byte-for-byte
+# the copy that manifest recorded, so a user-modified file is preserved and
+# reported instead. This generalizes the earlier single-path retirement of
+# .teamflow/instructions/AGENTS.md.
+if [[ -f "$MANIFEST_PATH" ]]; then
+  PREVIOUS_MANAGED=()
+  while IFS= read -r relative_path; do
+    [[ -n "$relative_path" ]] && PREVIOUS_MANAGED+=("$relative_path")
+  done < <(
+    node -e 'const m=JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"));for(const k of Object.keys(m.files||{}))console.log(k)' \
+      "$MANIFEST_PATH" 2>/dev/null || true
+  )
+  CURRENT_MANAGED=" ${FILES[*]} "
+  ORPHAN_DIRS=()
+  for relative_path in "${PREVIOUS_MANAGED[@]}"; do
+    [[ "$CURRENT_MANAGED" == *" $relative_path "* ]] && continue
+    orphan_path="$TARGET_ROOT/$relative_path"
+    [[ -f "$orphan_path" ]] || continue
+    previous_hash="$(manifest_hash "$relative_path")"
+    current_hash="$(sha256_file "$orphan_path")"
+    if [[ -n "$previous_hash" && "$previous_hash" == "$current_hash" ]]; then
+      unlink "$orphan_path"
+      echo "removed file no longer managed: $relative_path"
+      ORPHAN_DIRS+=("$(dirname "$orphan_path")")
+    else
+      echo "warning: preserving user-modified file no longer managed: $relative_path" >&2
+    fi
+  done
+  # Remove directories the pruning emptied, deepest first, stopping at
+  # .teamflow itself. rmdir refuses non-empty directories, so this can never
+  # delete surviving content.
+  if (( ${#ORPHAN_DIRS[@]} > 0 )); then
+    while IFS= read -r directory; do
+      while [[ "$directory" != "$TARGET_ROOT/.teamflow" && "$directory" == "$TARGET_ROOT/.teamflow"/* ]]; do
+        rmdir "$directory" 2>/dev/null || break
+        directory="$(dirname "$directory")"
+      done
+    done < <(printf '%s\n' "${ORPHAN_DIRS[@]}" | sort -ru)
   fi
 fi
+
 chmod +x "$TARGET_ROOT/.teamflow/bin/teamflow" "$TARGET_ROOT/.teamflow/bin/pi-runtime" \
   "$TARGET_ROOT/.teamflow/bin/memory" "$TARGET_ROOT/.teamflow/bin/memory-capture" \
   "$TARGET_ROOT/.teamflow/bin/test-patch" "$TARGET_ROOT/.teamflow/bin/server" \

@@ -1,4 +1,0 @@
-interface:
-  display_name: "Plan Change"
-  short_description: "Turn requests into executable acceptance plans"
-  default_prompt: "Use $plan-change to plan this change and define acceptance criteria."

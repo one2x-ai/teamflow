@@ -1,4 +1,0 @@
-interface:
-  display_name: "Detect Emotional Salience"
-  short_description: "Separate communication intensity from memory value"
-  default_prompt: "Classify observable communication signals and durable memory salience without psychological diagnosis."

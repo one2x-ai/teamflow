@@ -1,4 +1,0 @@
-interface:
-  display_name: "Basic Memory CLI"
-  short_description: "Use Basic Memory locally through CLI without MCP"
-  default_prompt: "Use $basic-memory-cli to recall or store verified local project knowledge."

@@ -56,6 +56,8 @@ Do not hand off vague requests such as "fix it" or "make tests pass".
 - Keep target-project integration limited to the standard `.teamflow/` entry in `.gitignore`; do not scatter runtime files across the repository root.
 - Keep Agent prompts and Skills concise; put shared policy here instead of duplicating it.
 - Put a test next to the code it exercises: `tests/` for `scripts/`, `.teamflow/tests/` for the installable runtime, `server/tests/` for the Bun service. Neither `.teamflow/tests/` nor `server/tests/` may ship to a target project.
+- Keep `.teamflow/` limited to Pi-agent runtime content. Another harness's config (`openai.yaml`, `CLAUDE.md`, `.codex/`) belongs in `.teamflow/.gitignore`, not in the managed file set.
+- Install product files only. Teamflow's own development context — test suites, `runs/`, `sessions/`, credentials, `docs/`, and the repository-level `AGENTS.md` and `README.md` — must never reach a business project.
 
 ## External loop observation
 

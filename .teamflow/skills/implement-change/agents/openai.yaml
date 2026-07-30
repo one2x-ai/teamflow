@@ -1,4 +1,0 @@
-interface:
-  display_name: "Implement Change"
-  short_description: "Implement the smallest change that passes tests"
-  default_prompt: "Use $implement-change to implement the approved plan and pass its tests."

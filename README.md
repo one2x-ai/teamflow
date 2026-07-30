@@ -82,6 +82,8 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 - 业务项目已有的 `AGENTS.md`、配置、脚本和源码完全保留。
 - manifest 位于 `.teamflow/manifest.json`，用于幂等更新和冲突检测。
 - 用户修改过的受管文件不会被静默覆盖；`--force` 会先备份到 `~/.teamflow/backups/`。
+- 只安装产品文件。Teamflow 自身的开发上下文不会进入业务项目：三层测试目录、`runs/`、`sessions/`、凭证（`auth.json`、`models-store.json`、`.env`）、`docs/` 设计文档、仓库级 `AGENTS.md` 与 `README.md` 全部排除；业务项目只收到 `.teamflow/AGENTS.md` 这份共享约束。
+- 模板移除某个受管文件后，重装会同步删除业务项目中的旧副本，并回收清空的目录；仅当该文件仍与上次 manifest 记录逐字节一致时才删除，用户改动过的文件保留并告警。
 
 除 `.gitignore` 的标准目录规则外，安装前后业务仓库的 `git status --short` 应保持不变。
 
@@ -316,6 +318,31 @@ teamflow memory-capture --receipt .teamflow/runs/task-receipts/<run-id>/receipt.
 - `TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS`：默认不设置，即不启用本地 wall-time。
 
 记忆策略：先搜索、后验证，只在全部质量门 PASS 后写入；禁止保存密钥、隐私数据、原始对话、完整日志或未验证猜测。
+
+## 运行时产物与清理
+
+`.teamflow/` 只承载 Pi agent 运行时内容（`agents/`、`skills/`、`extensions/`、`bin/`、可安装的 `server/` 源码）。以下都不进 Git，也不会被安装：
+
+```text
+.teamflow/runs/            # 阶段收据、测试补丁、记忆管道产物、截图
+.teamflow/sessions/        # 会话记录
+.teamflow/auth.json        # 凭证
+.teamflow/models-store.json
+.teamflow/.env
+.teamflow/node_modules/
+.teamflow/tests/           # 运行时自身测试（追踪但不安装）
+```
+
+其他 AI harness 的配置在 `.teamflow/.gitignore` 中忽略（`openai.yaml`、`CLAUDE.md`、`.codex/`、`.cursor/`、`.windsurf/`），因此另一个工具可以在该目录下放自己的配置，而不会变成被 `install.sh` 复制到业务项目的受管文件。
+
+清理一次性原始输出：
+
+```bash
+python3 scripts/clean.py --dry-run    # 预览
+python3 scripts/clean.py              # 执行
+```
+
+只删除 `.teamflow/runs/` 下的 `.ndjson`、`.log`、截图（`.png`/`.jpg`/`.jpeg`/`.gif`/`.webp`）与 `server-scope-adapter` 临时目录；task-receipts、test-patches 和记忆管道的阶段 JSON 属于证据，始终保留。
 
 ## 测试布局
 
