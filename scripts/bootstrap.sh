@@ -101,6 +101,25 @@ else
   echo "Installed teamflow launcher: $LAUNCHER_PATH"
 fi
 
+# The memory browser reads the shared cross-project store, so one global copy
+# serves every project instead of being installed per project. Sync only the
+# runnable sources; tests and local build state stay in the repository.
+TEAMFLOW_HOME="${TEAMFLOW_HOME:-$HOME/.teamflow}"
+SERVER_TARGET="$TEAMFLOW_HOME/server"
+if [[ -d "$ROOT_DIR/server" ]]; then
+  mkdir -p "$SERVER_TARGET"
+  while IFS= read -r relative_path; do
+    mkdir -p "$SERVER_TARGET/$(dirname "$relative_path")"
+    install -m 0644 "$ROOT_DIR/server/$relative_path" "$SERVER_TARGET/$relative_path"
+  done < <(
+    cd "$ROOT_DIR/server"
+    find . -type f ! -path './node_modules/*' ! -path './tests/*' \
+      ! -path './dist/*' ! -name 'bun.lock' ! -name 'bun.lockb' \
+      ! -path '*/__pycache__/*' ! -name '*.pyc' -print | sed 's#^\./##' | sort
+  )
+  echo "Installed memory browser: $SERVER_TARGET"
+fi
+
 echo "Pi $(pi --version) is available."
 echo "$(basic-memory --version) is available."
 echo "Next: edit .env, run ./scripts/setup.sh and ./scripts/doctor.sh, then ./scripts/install.sh <target-project>."

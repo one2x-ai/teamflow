@@ -69,6 +69,15 @@ else
   echo "no launcher at $LAUNCHER_PATH"
 fi
 
+# --- global memory browser -------------------------------------------------
+SERVER_DIR="$TEAMFLOW_HOME/server"
+if [[ -d "$SERVER_DIR" ]]; then
+  act "$SERVER_DIR"
+  [[ "$DRY_RUN" == true ]] || rm -rf "$SERVER_DIR"
+else
+  echo "no memory browser at $SERVER_DIR"
+fi
+
 # --- optional project runtime ---------------------------------------------
 if [[ -n "$PROJECT_INPUT" ]]; then
   PROJECT_ROOT="$(git -C "$PROJECT_INPUT" rev-parse --show-toplevel 2>/dev/null || true)"

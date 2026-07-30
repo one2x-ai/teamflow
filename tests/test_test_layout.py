@@ -8,9 +8,10 @@ Tests live next to the code they exercise:
                        bin/ — everything under .teamflow/
   server/tests/        the Bun HTTP memory server
 
-Neither .teamflow/tests/ nor server/tests/ may reach a target project: the
-installer ships product files only, so a business repository never carries
-Teamflow's own test suite.
+Neither .teamflow/tests/ nor server/tests/ may reach a target project:
+.teamflow/tests/ is outside the installer's FILES allowlist and outside the
+directories it walks, and server/ is not installed at all — the memory
+browser is a single global tool, so a copy per project never exists.
 """
 
 import os
@@ -88,15 +89,25 @@ class OuterTierScopeTests(unittest.TestCase):
 class InstallerExcludesTestsTests(unittest.TestCase):
     """The installer ships product files only."""
 
-    def test_install_script_excludes_server_tests_from_find(self):
-        """server/ ships via find, so tests/ needs an explicit prune."""
+    def test_install_script_does_not_walk_server(self):
+        """server/ no longer ships at all, so no prune rule is needed.
+
+        The memory browser reads the shared cross-project store, so a single
+        global copy serves every project; install.sh stopped walking server/
+        entirely. That is a stronger guarantee than pruning tests from the
+        walk, and it means server/tests/ can never leak.
+        """
         text = read(INSTALL)
-        find_start = text.index("find server")
-        find_block = text[find_start : text.index("-print", find_start)]
-        self.assertIn(
-            "! -path '*/tests/*'",
-            find_block,
-            "install.sh must prune */tests/* when walking server/",
+        self.assertNotIn(
+            "find server",
+            text,
+            "install.sh must not walk server/: the browser is installed once "
+            "globally, not per project",
+        )
+        self.assertNotIn(
+            ".teamflow/server/",
+            text,
+            "install.sh must not manage any server path",
         )
 
     def test_install_manifest_lists_no_test_modules(self):

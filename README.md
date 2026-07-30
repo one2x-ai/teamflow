@@ -96,7 +96,7 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 ./scripts/uninstall.sh --project /path/to/project --memory  # 连本地记忆一起删除
 ```
 
-默认只删除全局入口 `~/.local/bin/teamflow`，且仅当该文件带有 teamflow 标记时才动手，不会误删同名的第三方命令。
+默认删除全局入口 `~/.local/bin/teamflow` 与全局记忆浏览服务 `~/.teamflow/server/`；入口仅当带有 teamflow 标记时才动手，不会误删同名的第三方命令。
 
 `--project` 会删除该项目的 `.teamflow/` 目录，并只移除安装器写入的 `.teamflow/` 忽略规则与其说明行，业务项目自己的 `.gitignore` 规则完整保留。
 
@@ -131,7 +131,7 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 ├── extensions/
 │   ├── teamflow-task/        # task(agent, prompt) 角色启动器（仅显式授权的深度 0 角色注册）
 │   └── memory-context/       # Phase A 观察模式状态机（监听 hook）+ Phase B 冷记忆持久化（turn-block/cold-memory-store/file-cold-store）+ Phase C 可见 XML 上下文注入 + Phase D 热区投影与 no-compact 拦截 + Phase E 准则 cache（rule-cache/rule-cache-reducer）
-├── server/                   # Bun + TypeScript HTTP 服务源码
+│                             # 注：server 源码不在此处，见全局 ~/.teamflow/server/
 ├── experiments/bin/          # 显式调用的临时实验，不由 teamflow 命令暴露
 └── runs/                     # 临时运行产物
 ```
@@ -307,7 +307,36 @@ teamflow memory-capture --receipt .teamflow/runs/task-receipts/<run-id>/receipt.
 
 `test-writer` 采用产物优先的检查点：完成一次聚焦代码检查和一次代表性测试惯例检查后，先写 `tests.patch`，再继续校验和精炼。Planner 会在委派返回后独立检查该补丁；`finish=length` 或缺少强制产物会将当前 phase 明确结束为 `BLOCKED`，不会把空返回当成功或在同一 phase 内静默重试。
 
-`teamflow server` 的实现是 Bun + TypeScript，源码位于仓库根目录 `server/`（"实现集中在 `.teamflow/`" 原则的唯一文档化例外）；`scripts/install.sh` 会把它安装到目标项目的 `.teamflow/server/` 下。服务使用 `Bun.serve`，运行时只依赖 Bun 内置与标准 API（零 npm 运行时依赖），并通过 `--local` 调用本机已有的 `basic-memory` CLI 读取记忆；不使用 MCP、云同步、账号或密钥。开发期类型检查：`cd server && bun install && bun run typecheck`。
+`teamflow server` 的实现是 Bun + TypeScript，源码位于仓库根目录 `server/`（"实现集中在 `.teamflow/`" 原则的唯一文档化例外）。它读取的是跨项目共享记忆库，不是项目数据，因此**不按项目安装**：`bootstrap.sh` 与 `install.sh` 只把它同步到全局 `~/.teamflow/server/` 一份，业务项目只收到瘦包装 `.teamflow/bin/server`。包装器按 `TEAMFLOW_SERVER_DIR` → `$TEAMFLOW_HOME/server` → `<repo>/server` 顺序定位源码，找不到时给出明确诊断而非静默失败。
+
+服务使用 `Bun.serve`，运行时只依赖 Bun 内置与标准 API（零 npm 运行时依赖），并通过 `--local` 调用本机已有的 `basic-memory` CLI 读取记忆；不使用 MCP、云同步、账号或密钥。
+
+前端按页面拆分为独立资源，避免把 HTML/CSS/JS 堆在一个 TS 文件里：
+
+```text
+server/src/
+├── server.ts          # 路由、basic-memory 调用、页面装配（348 行）
+└── ui/
+    ├── list.html      # 列表页结构（片段，不含 doctype/head）
+    ├── list.css
+    ├── list.js
+    ├── detail.html
+    ├── detail.css
+    └── detail.js
+```
+
+`server.ts` 的 `renderPage()` 在请求时读取这三个资源并包进文档外壳。服务路径**没有构建步骤**——`bin/server` 直接用 Bun 跑 TypeScript 源码，新克隆与全局安装都无需 build。
+
+Vite 只用于前端本地迭代，产物不参与服务：
+
+```bash
+cd server && bun install
+bun run dev      # 终端 1：Bun 服务在 7324，提供真实装配的页面
+bun run ui:dev   # 终端 2：Vite 在 5173，热重载资源，/api 代理到 7324
+bun run typecheck
+```
+
+`vite.config.ts` 的预览插件在请求时读取 `list.html`/`detail.html` **真实片段**再包外壳，因此预览与线上共用同一份结构，不会漂移；仓库中刻意不提供 `build` 脚本，`server/dist/` 也被 git 忽略，避免误以为构建产物是被服务的内容。
 
 可配置项：
 
@@ -362,7 +391,7 @@ python -m pytest .teamflow/tests                      # 只测运行时
 cd server && bun run typecheck                        # server 类型检查
 ```
 
-`.teamflow/tests/` 与 `server/tests/` 都**不会**被安装到业务项目：前者不在 `install.sh` 的 `FILES` 白名单也不在其 `find` 路径中，后者由 `find server ... ! -path '*/tests/*'` 显式剪除。`tests/test_test_layout.py` 固化这两条约束，并校验搬移后的模块仍以正确深度解析仓库根。
+`.teamflow/tests/` 与 `server/tests/` 都**不会**被安装到业务项目：前者不在 `install.sh` 的 `FILES` 白名单也不在其 `find` 路径中；后者更彻底——`server/` 整体不参与安装，因此其测试根本没有泄漏路径。`tests/test_test_layout.py` 固化这两条约束，并校验搬移后的模块仍以正确深度解析仓库根。
 
 ## 维护与诊断
 
@@ -398,8 +427,10 @@ teamflow debug skill
 │   ├── skills/
 │   ├── bin/
 │   └── tests/             # 运行时自身测试（不安装）
-├── server/                # Bun + TypeScript 只读记忆浏览服务源码（仓库级例外）
-│   └── tests/             # server 自身测试（不安装）
+├── server/                # Bun + TypeScript 只读记忆浏览服务源码（仓库级例外，不安装）
+│   ├── src/ui/            # 按页面拆分的 html/css/js
+│   ├── vite.config.ts     # 仅前端本地迭代
+│   └── tests/             # server 自身测试
 ├── tests/                 # scripts/ 的测试
 └── scripts/
     ├── bootstrap.sh       # 安装运行时与全局入口

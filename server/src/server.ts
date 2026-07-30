@@ -243,367 +243,77 @@ async function handleMemory(url: URL): Promise<Response> {
   }
 }
 
-function htmlPage(): Response {
-  const headerTitle =
-    workspaceSlug === null
-      ? "<h1>Teamflow Memory</h1>"
-      : `<h1 data-workspace="${workspaceSlug}">Teamflow Memory <span class="workspace">(${workspaceSlug})</span></h1>`;
+// --- page assembly ---------------------------------------------------------
+//
+// Page structure, styles, and behavior live in src/ui/<page>.{html,css,js}.
+// They are read at request time and wrapped in a document shell here, so the
+// server keeps serving TypeScript source directly with no build step. The
+// asset text is inlined into the response rather than served as separate
+// files to preserve the single-request, zero-dependency page contract.
+
+const UI_DIR = new URL("./ui/", import.meta.url);
+
+async function readAsset(name: string): Promise<string> {
+  return await Bun.file(new URL(name, UI_DIR)).text();
+}
+
+interface PageOptions {
+  page: string;
+  title: string;
+  substitutions?: Record<string, string>;
+}
+
+async function renderPage({ page, title, substitutions = {} }: PageOptions): Promise<Response> {
+  const [body, css, js] = await Promise.all([
+    readAsset(`${page}.html`),
+    readAsset(`${page}.css`),
+    readAsset(`${page}.js`),
+  ]);
+
+  // Server-side placeholders appear only in the html fragment and are always
+  // markup this module built itself, never request or memory data.
+  const resolvedBody = Object.entries(substitutions).reduce(
+    (text, [key, value]) => text.replaceAll(`\${${key}}`, value),
+    body,
+  );
+
   const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Teamflow Memory</title>
+<title>${title}</title>
 <style>
-  :root { color-scheme: light dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: #0f1115;
-    color: #e6e8eb;
-    line-height: 1.5;
-  }
-  header {
-    padding: 1rem 1.25rem;
-    border-bottom: 1px solid #262b33;
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.75rem 1.5rem;
-  }
-  header h1 { font-size: 1.25rem; margin: 0; }
-  main { max-width: 960px; margin: 0 auto; padding: 1rem 1.25rem 2.5rem; }
-  form { display: flex; flex: 1 1 280px; gap: 0.5rem; }
-  form input[type="search"] {
-    flex: 1;
-    padding: 0.5rem 0.75rem;
-    border: 1px solid #3a414c;
-    border-radius: 6px;
-    background: #171b22;
-    color: inherit;
-  }
-  button {
-    padding: 0.5rem 0.9rem;
-    border: 1px solid #3a414c;
-    border-radius: 6px;
-    background: #1f242d;
-    color: inherit;
-    cursor: pointer;
-  }
-  button:disabled { opacity: 0.45; cursor: default; }
-  #summary { margin: 0.75rem 0; color: #9aa3af; font-size: 0.9rem; }
-  .state { padding: 2rem 1rem; text-align: center; color: #9aa3af; }
-  [hidden] { display: none !important; }
-  #cards {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 0.9rem;
-  }
-  .card {
-    border: 1px solid #262b33;
-    border-radius: 8px;
-    background: #171b22;
-    padding: 0.9rem 1rem;
-  }
-  .card h2 { font-size: 1rem; margin: 0 0 0.4rem; word-break: break-word; }
-  .card p { margin: 0 0 0.5rem; font-size: 0.88rem; color: #c3c9d1; word-break: break-word; }
-  .card .meta { font-size: 0.78rem; color: #8b939e; display: flex; flex-direction: column; gap: 0.15rem; }
-  .card a { color: #7ab3ff; text-decoration: none; word-break: break-all; }
-  .card a:hover { text-decoration: underline; }
-  .pager {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 1rem;
-    margin-top: 1.5rem;
-  }
-  #page-info { color: #9aa3af; font-size: 0.9rem; }
-  @media (max-width: 560px) {
-    header { flex-direction: column; align-items: stretch; }
-    form { flex: 1 1 auto; }
-  }
-</style>
+${css}</style>
 </head>
 <body>
-<header>
-  ${headerTitle}
-  <form id="search-form" role="search">
-    <input type="search" name="query" placeholder="Search memories" aria-label="Search memories">
-    <button type="submit">Search</button>
-  </form>
-</header>
-<main>
-  <div id="summary" aria-live="polite"></div>
-  <div class="state" data-state="loading" hidden>Loading memories...</div>
-  <div class="state" data-state="empty" hidden>No memories found.</div>
-  <div class="state" data-state="error" hidden>Failed to load memories. Please try again.</div>
-  <div id="cards"></div>
-  <nav class="pager" aria-label="Pagination">
-    <button type="button" id="prev-btn">Previous</button>
-    <span id="page-info"></span>
-    <button type="button" id="next-btn">Next</button>
-  </nav>
-</main>
-<script>
-document.addEventListener("DOMContentLoaded", function () {
-  var cardsEl = document.getElementById("cards");
-  var summaryEl = document.getElementById("summary");
-  var loadingEl = document.querySelector('[data-state="loading"]');
-  var emptyEl = document.querySelector('[data-state="empty"]');
-  var errorEl = document.querySelector('[data-state="error"]');
-  var prevBtn = document.getElementById("prev-btn");
-  var nextBtn = document.getElementById("next-btn");
-  var pageInfoEl = document.getElementById("page-info");
-  var formEl = document.getElementById("search-form");
-  var queryInput = formEl.querySelector('input[name="query"]');
-
-  var currentPage = 1;
-  var totalPages = 1;
-  var currentQuery = "";
-
-  function setState(name) {
-    loadingEl.hidden = name !== "loading";
-    emptyEl.hidden = name !== "empty";
-    errorEl.hidden = name !== "error";
-  }
-
-  function clearCards() {
-    while (cardsEl.firstChild) {
-      cardsEl.removeChild(cardsEl.firstChild);
-    }
-  }
-
-  function pickText(item, keys) {
-    for (var i = 0; i < keys.length; i += 1) {
-      var value = item[keys[i]];
-      if (typeof value === "string" && value.trim() !== "") {
-        return value;
-      }
-    }
-    return "";
-  }
-
-  function truncate(text, max) {
-    if (text.length <= max) {
-      return text;
-    }
-    return text.slice(0, max) + "...";
-  }
-
-  function addMeta(card, label, value) {
-    if (typeof value !== "string" || value === "") {
-      return;
-    }
-    var row = document.createElement("span");
-    row.textContent = label + ": " + value;
-    card.appendChild(row);
-  }
-
-  function renderCard(item) {
-    var card = document.createElement("article");
-    card.className = "card";
-
-    var title = document.createElement("h2");
-    var titleText = pickText(item, ["title"]);
-    var permalink = typeof item.permalink === "string" ? item.permalink : "";
-    if (permalink !== "") {
-      var titleLink = document.createElement("a");
-      titleLink.setAttribute("href", "/memory?permalink=" + encodeURIComponent(permalink));
-      titleLink.textContent = titleText === "" ? "Untitled" : titleText;
-      title.appendChild(titleLink);
-    } else {
-      title.textContent = titleText === "" ? "Untitled" : titleText;
-    }
-    card.appendChild(title);
-
-    var excerpt = pickText(item, ["content", "body", "summary", "text"]);
-    if (excerpt !== "") {
-      var body = document.createElement("p");
-      body.textContent = truncate(excerpt, 240);
-      card.appendChild(body);
-    }
-
-    var meta = document.createElement("div");
-    meta.className = "meta";
-    addMeta(meta, "type", typeof item.type === "string" ? item.type : "");
-    addMeta(meta, "created", typeof item.created_at === "string" ? item.created_at : "");
-    card.appendChild(meta);
-
-    return card;
-  }
-
-  function updatePager() {
-    prevBtn.disabled = currentPage <= 1;
-    nextBtn.disabled = currentPage >= totalPages;
-    pageInfoEl.textContent = "Page " + currentPage + " of " + totalPages;
-  }
-
-  function load(page) {
-    setState("loading");
-    clearCards();
-    var url = "/api/memories?page=1&page_size=12";
-    if (page !== 1) {
-      url = "/api/memories?page=" + page + "&page_size=12";
-    }
-    if (currentQuery !== "") {
-      url += "&query=" + encodeURIComponent(currentQuery);
-    }
-    fetch(url)
-      .then(function (res) {
-        if (!res.ok) {
-          throw new Error("request failed with status " + res.status);
-        }
-        return res.json();
-      })
-      .then(function (data) {
-        var items = Array.isArray(data.items) ? data.items : [];
-        currentPage = typeof data.page === "number" ? data.page : page;
-        totalPages = typeof data.total_pages === "number" ? data.total_pages : 1;
-        var total = typeof data.total === "number" ? data.total : items.length;
-
-        if (items.length === 0) {
-          summaryEl.textContent = currentQuery === ""
-            ? "No recent activity"
-            : 'No results for "' + currentQuery + '"';
-          setState("empty");
-        } else {
-          summaryEl.textContent = currentQuery === ""
-            ? total + " memories"
-            : 'Search results for "' + currentQuery + '" (' + total + ")";
-          setState("ready");
-          for (var i = 0; i < items.length; i += 1) {
-            cardsEl.appendChild(renderCard(items[i] || {}));
-          }
-        }
-        updatePager();
-      })
-      .catch(function () {
-        summaryEl.textContent = "";
-        setState("error");
-        updatePager();
-      });
-  }
-
-  formEl.addEventListener("submit", function (event) {
-    event.preventDefault();
-    currentQuery = queryInput.value.trim();
-    load(1);
-  });
-
-  queryInput.addEventListener("input", function () {
-    if (queryInput.value.trim() === "" && currentQuery !== "") {
-      currentQuery = "";
-      load(1);
-    }
-  });
-
-  prevBtn.addEventListener("click", function () {
-    if (currentPage > 1) {
-      load(currentPage - 1);
-    }
-  });
-
-  nextBtn.addEventListener("click", function () {
-    if (currentPage < totalPages) {
-      load(currentPage + 1);
-    }
-  });
-
-  load(1);
-});
-</script>
+${resolvedBody}<script>
+${js}</script>
 </body>
 </html>
 `;
+
   return new Response(html, {
     status: 200,
     headers: { "content-type": "text/html; charset=utf-8" },
   });
 }
 
-function detailPage(): Response {
-  const workspaceLabel = workspaceSlug === null ? "" : ` (${workspaceSlug})`;
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Memory detail${workspaceLabel}</title>
-<style>
-  :root { color-scheme: light dark; }
-  * { box-sizing: border-box; }
-  body {
-    margin: 0;
-    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-    background: #0f1115;
-    color: #e6e8eb;
-    line-height: 1.6;
-  }
-  header { padding: 1rem 1.25rem; border-bottom: 1px solid #262b33; }
-  header a { color: #7ab3ff; text-decoration: none; }
-  header a:hover { text-decoration: underline; }
-  main { max-width: 840px; margin: 0 auto; padding: 1.5rem 1.25rem 3rem; }
-  article { border: 1px solid #262b33; border-radius: 8px; background: #171b22; padding: 1.25rem; }
-  h1 { margin: 0 0 1rem; font-size: 1.5rem; line-height: 1.3; }
-  #detail-content { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; color: #cbd1d8; }
-  .state { padding: 2rem 0; color: #9aa3af; }
-  [hidden] { display: none !important; }
-</style>
-</head>
-<body>
-<header><a href="/">&larr; Back to memories</a></header>
-<main>
-  <div class="state" data-state="loading">Loading memory...</div>
-  <div class="state" data-state="error" hidden>Failed to load this memory.</div>
-  <article id="detail" hidden>
-    <h1 id="detail-title"></h1>
-    <pre id="detail-content"></pre>
-  </article>
-</main>
-<script>
-document.addEventListener("DOMContentLoaded", function () {
-  var loadingEl = document.querySelector('[data-state="loading"]');
-  var errorEl = document.querySelector('[data-state="error"]');
-  var detailEl = document.getElementById("detail");
-  var titleEl = document.getElementById("detail-title");
-  var contentEl = document.getElementById("detail-content");
-  var permalink = new URLSearchParams(window.location.search).get("permalink") || "";
-
-  if (permalink === "") {
-    loadingEl.hidden = true;
-    errorEl.hidden = false;
-    return;
-  }
-
-  fetch("/api/memory?permalink=" + encodeURIComponent(permalink))
-    .then(function (res) {
-      if (!res.ok) {
-        throw new Error("request failed with status " + res.status);
-      }
-      return res.json();
-    })
-    .then(function (memory) {
-      titleEl.textContent = typeof memory.title === "string" && memory.title !== ""
-        ? memory.title
-        : "Untitled";
-      contentEl.textContent = typeof memory.content === "string" ? memory.content : "";
-      loadingEl.hidden = true;
-      detailEl.hidden = false;
-    })
-    .catch(function () {
-      loadingEl.hidden = true;
-      errorEl.hidden = false;
-    });
-});
-</script>
-</body>
-</html>
-`;
-  return new Response(html, {
-    status: 200,
-    headers: { "content-type": "text/html; charset=utf-8" },
+function listPage(): Promise<Response> {
+  const headerTitle =
+    workspaceSlug === null
+      ? "<h1>Teamflow Memory</h1>"
+      : `<h1 data-workspace="${workspaceSlug}">Teamflow Memory <span class="workspace">(${workspaceSlug})</span></h1>`;
+  return renderPage({
+    page: "list",
+    title: "Teamflow Memory",
+    substitutions: { headerTitle },
   });
+}
+
+function detailPage(): Promise<Response> {
+  const workspaceLabel = workspaceSlug === null ? "" : ` (${workspaceSlug})`;
+  return renderPage({ page: "detail", title: `Memory detail${workspaceLabel}` });
 }
 
 Bun.serve({
@@ -627,7 +337,7 @@ Bun.serve({
       return detailPage();
     }
     if (url.pathname === "/") {
-      return htmlPage();
+      return listPage();
     }
     return jsonResponse({ error: "not found" }, 404);
   },

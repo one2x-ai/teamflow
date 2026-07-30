@@ -72,11 +72,10 @@ while IFS= read -r relative_path; do FILES+=("$relative_path"); done < <(
   find .teamflow/agents .teamflow/skills -type f \
     ! -path '*/__pycache__/*' ! -name '*.pyc' -print | sed 's#^./##' | sort
 )
-while IFS= read -r relative_path; do FILES+=(".teamflow/$relative_path"); done < <(
-  cd "$SOURCE_ROOT"
-  find server -type f ! -path '*/node_modules/*' ! -name 'bun.lock' ! -name 'bun.lockb' \
-    ! -path '*/tests/*' ! -path '*/__pycache__/*' ! -name '*.pyc' -print | sort
-)
+# The memory browser (teamflow server) reads the shared cross-project store
+# under ~/.teamflow/memory/, not project data, so its source stays in the
+# Teamflow repository. Only .teamflow/bin/server ships; it resolves the
+# server source from the Teamflow installation at run time.
 
 MANIFEST_PATH="$TARGET_ROOT/.teamflow/manifest.json"
 sha256_file() { shasum -a 256 "$1" | awk '{print $1}'; }
@@ -88,12 +87,7 @@ manifest_hash() {
 
 CONFLICTS=()
 for relative_path in "${FILES[@]}"; do
-  source_relative="${relative_path#.teamflow/}"
-  if [[ "$relative_path" == .teamflow/server/* ]]; then
-    source_path="$SOURCE_ROOT/${relative_path#.teamflow/}"
-  else
-    source_path="$SOURCE_ROOT/$relative_path"
-  fi
+  source_path="$SOURCE_ROOT/$relative_path"
   destination_path="$TARGET_ROOT/$relative_path"
   [[ -f "$destination_path" ]] || continue
   cmp -s "$source_path" "$destination_path" && continue
@@ -127,11 +121,7 @@ if (( ${#CONFLICTS[@]} > 0 )); then
 fi
 
 for relative_path in "${FILES[@]}"; do
-  if [[ "$relative_path" == .teamflow/server/* ]]; then
-    source_path="$SOURCE_ROOT/${relative_path#.teamflow/}"
-  else
-    source_path="$SOURCE_ROOT/$relative_path"
-  fi
+  source_path="$SOURCE_ROOT/$relative_path"
   destination_path="$TARGET_ROOT/$relative_path"
   mkdir -p "$(dirname "$destination_path")"
   cp -p "$source_path" "$destination_path"
@@ -217,6 +207,22 @@ if [[ -f "$LAUNCHER_PATH" ]] && ! grep -q 'agent-teamflow-launcher' "$LAUNCHER_P
 else
   mkdir -p "$LAUNCHER_DIR"
   install -m 0755 "$SOURCE_ROOT/scripts/teamflow" "$LAUNCHER_PATH"
+fi
+
+# Keep the single global memory-browser copy current. It is shared by every
+# project rather than installed into any of them.
+SERVER_TARGET="$TEAMFLOW_HOME/server"
+if [[ -d "$SOURCE_ROOT/server" ]]; then
+  mkdir -p "$SERVER_TARGET"
+  while IFS= read -r relative_path; do
+    mkdir -p "$SERVER_TARGET/$(dirname "$relative_path")"
+    install -m 0644 "$SOURCE_ROOT/server/$relative_path" "$SERVER_TARGET/$relative_path"
+  done < <(
+    cd "$SOURCE_ROOT/server"
+    find . -type f ! -path './node_modules/*' ! -path './tests/*' \
+      ! -path './dist/*' ! -name 'bun.lock' ! -name 'bun.lockb' \
+      ! -path '*/__pycache__/*' ! -name '*.pyc' -print | sed 's#^\./##' | sort
+  )
 fi
 
 VALIDATION_HOME="${TMPDIR:-/tmp}/agent-teamflow-init-validation"

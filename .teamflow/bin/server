@@ -1,9 +1,35 @@
 #!/usr/bin/env bash
+# Launch the read-only memory browser.
+#
+# The server reads the shared cross-project store under ~/.teamflow/memory/,
+# so a single copy of its source serves every project. It is not installed
+# per project; this wrapper resolves it from, in order:
+#   1. TEAMFLOW_SERVER_DIR              explicit override
+#   2. $TEAMFLOW_HOME/server            global installation
+#   3. <repo>/server                    running inside the Teamflow repo
 set -euo pipefail
+
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-RUNTIME_DIR="$ROOT_DIR/.teamflow"
-SERVER_DIR="$RUNTIME_DIR/server"
-if [[ ! -d "$SERVER_DIR" ]]; then
-  SERVER_DIR="$ROOT_DIR/server"
+TEAMFLOW_HOME="${TEAMFLOW_HOME:-$HOME/.teamflow}"
+
+CANDIDATES=()
+[[ -n "${TEAMFLOW_SERVER_DIR:-}" ]] && CANDIDATES+=("$TEAMFLOW_SERVER_DIR")
+CANDIDATES+=("$TEAMFLOW_HOME/server" "$ROOT_DIR/server")
+
+SERVER_DIR=""
+for candidate in "${CANDIDATES[@]}"; do
+  if [[ -f "$candidate/src/server.ts" ]]; then
+    SERVER_DIR="$candidate"
+    break
+  fi
+done
+
+if [[ -z "$SERVER_DIR" ]]; then
+  echo "error: memory browser source not found" >&2
+  echo "Looked for src/server.ts in:" >&2
+  printf '  %s\n' "${CANDIDATES[@]}" >&2
+  echo "Set TEAMFLOW_SERVER_DIR, or run ./scripts/bootstrap.sh in the Teamflow repository." >&2
+  exit 1
 fi
+
 exec bun "$SERVER_DIR/src/server.ts" "$@"

@@ -16,3 +16,6 @@ __pycache__/
 server/node_modules/
 server/bun.lock
 server/bun.lockb
+server/dist/
+server/.vite/
+server/src/ui/.vite/

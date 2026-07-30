@@ -1,10 +1,15 @@
-"""Installer wiring for the read-only memory server.
+"""Install isolation for the read-only memory server.
 
-This asserts scripts/install.sh behavior — that it ships the Bun server
-source under .teamflow/server/ and wires the `teamflow server` dispatch
-branch. It is an installer test, not a server test, so it lives in the
-outer tests/ tree next to the other install.sh checks. The server's own
-HTTP, UI, and scope behavior is tested in server/tests/.
+`teamflow server` browses the shared cross-project store under
+~/.teamflow/memory/. It reads global data, not project data, so its source
+lives only in the Teamflow repository and is never copied into a business
+project — the same rule that keeps scripts/ out. Only the thin dispatch
+wrapper .teamflow/bin/server ships, and it resolves the server source from
+the Teamflow installation.
+
+This asserts scripts/install.sh behavior, so it lives in the outer tests/
+tree next to the other install.sh checks. The server's own HTTP, UI, and
+scope behavior is tested in server/tests/.
 
 File- and text-level only; no bun runtime required.
 """
@@ -149,30 +154,57 @@ class MemoryServerInstallerTests(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
 
+
+            # The memory browser reads the shared cross-project store under
+            # ~/.teamflow/memory/, not project data, so its source stays in
+            # the Teamflow repository and is never copied per project.
             for relative in (
+                ".teamflow/server",
                 ".teamflow/server/src/server.ts",
                 ".teamflow/server/package.json",
-                ".teamflow/server/tsconfig.json",
-                ".teamflow/bin/server",
             ):
                 with self.subTest(path=relative):
-                    self.assertTrue((project / relative).is_file(), relative)
+                    self.assertFalse(
+                        (project / relative).exists(),
+                        f"{relative} must not be installed: the server is a "
+                        "single global tool, not per-project runtime",
+                    )
 
             manifest = json.loads(
                 (project / ".teamflow/manifest.json").read_text(encoding="utf-8")
+            )
+            server_entries = [
+                key for key in manifest["files"]
+                if key.startswith(".teamflow/server/")
+            ]
+            self.assertEqual(
+                server_entries, [],
+                f"manifest must not manage server sources: {server_entries}",
             )
             for manifest_key in manifest["files"]:
                 with self.subTest(manifest_key=manifest_key):
                     self.assertTrue(manifest_key.startswith(".teamflow/"), manifest_key)
 
+            # The dispatch wrapper still ships, and resolves the server from
+            # the Teamflow installation rather than the project.
+            self.assertTrue((project / ".teamflow/bin/server").is_file())
             teamflow_bin = (project / ".teamflow/bin/teamflow").read_text(encoding="utf-8")
             self.assertRegex(teamflow_bin, r'["\']server["\']')
             self.assertIn("bin/server", teamflow_bin)
 
             server_wrapper = (project / ".teamflow/bin/server").read_text(encoding="utf-8")
-            self.assertIn("server.ts", server_wrapper)
             self.assertIn("bun", server_wrapper)
-
+            self.assertRegex(
+                server_wrapper,
+                r"TEAMFLOW_SERVER_DIR|TEAMFLOW_HOME|teamflow/server",
+                "bin/server must resolve the globally installed server source",
+            )
+            self.assertRegex(
+                server_wrapper,
+                r"exit 1|error:",
+                "bin/server must fail with a clear message when the source "
+                "cannot be located",
+            )
 
 
 if __name__ == "__main__":

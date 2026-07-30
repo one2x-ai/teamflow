@@ -1,0 +1,19 @@
+<header>
+  ${headerTitle}
+  <form id="search-form" role="search">
+    <input type="search" name="query" placeholder="Search memories" aria-label="Search memories">
+    <button type="submit">Search</button>
+  </form>
+</header>
+<main>
+  <div id="summary" aria-live="polite"></div>
+  <div class="state" data-state="loading" hidden>Loading memories...</div>
+  <div class="state" data-state="empty" hidden>No memories found.</div>
+  <div class="state" data-state="error" hidden>Failed to load memories. Please try again.</div>
+  <div id="cards"></div>
+  <nav class="pager" aria-label="Pagination">
+    <button type="button" id="prev-btn">Previous</button>
+    <span id="page-info"></span>
+    <button type="button" id="next-btn">Next</button>
+  </nav>
+</main>
