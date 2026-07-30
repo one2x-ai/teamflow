@@ -23,7 +23,7 @@ import urllib.request
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SERVER_ENTRYPOINT = ROOT / "server" / "src" / "server.ts"
 BUN = shutil.which("bun")
 _NO_PROXY_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -509,70 +509,6 @@ class MemoryServerHttpTests(unittest.TestCase):
                     self.assertIsInstance(body, dict)
                 finally:
                     fixture.stop()
-
-
-class MemoryServerInstallerTests(unittest.TestCase):
-    """Installer/dispatch wiring. File- and text-level only; no bun required."""
-
-    def test_installer_wires_server_source_and_dispatch(self):
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            home = root / "home"
-            bin_dir = root / "fake-bin"
-            launchers = root / "launchers"
-            home.mkdir(parents=True)
-            launchers.mkdir(parents=True)
-            log = write_fake_tools(bin_dir)
-            project = root / "target"
-            project.mkdir()
-            subprocess.run(["git", "init", "-q", str(project)], check=True)
-
-            env = os.environ.copy()
-            for key in list(env):
-                if key.startswith(("TEAMFLOW_", "WORKFLOW_", "OPENCODE_WORKFLOW_", "BASIC_MEMORY_")):
-                    env.pop(key)
-            env.update(
-                {
-                    "HOME": str(home),
-                    "PATH": f"{bin_dir}:{env['PATH']}",
-                    "TEAMFLOW_HOME": str(home / ".teamflow"),
-                    "TEAMFLOW_BIN_DIR": str(launchers),
-                    "FAKE_BASIC_MEMORY_LOG": str(log),
-                }
-            )
-            completed = subprocess.run(
-                [str(ROOT / "scripts/install.sh"), str(project)],
-                cwd=ROOT,
-                env=env,
-                text=True,
-                capture_output=True,
-                timeout=60,
-            )
-            self.assertEqual(completed.returncode, 0, completed.stderr)
-
-            for relative in (
-                ".teamflow/server/src/server.ts",
-                ".teamflow/server/package.json",
-                ".teamflow/server/tsconfig.json",
-                ".teamflow/bin/server",
-            ):
-                with self.subTest(path=relative):
-                    self.assertTrue((project / relative).is_file(), relative)
-
-            manifest = json.loads(
-                (project / ".teamflow/manifest.json").read_text(encoding="utf-8")
-            )
-            for manifest_key in manifest["files"]:
-                with self.subTest(manifest_key=manifest_key):
-                    self.assertTrue(manifest_key.startswith(".teamflow/"), manifest_key)
-
-            teamflow_bin = (project / ".teamflow/bin/teamflow").read_text(encoding="utf-8")
-            self.assertRegex(teamflow_bin, r'["\']server["\']')
-            self.assertIn("bin/server", teamflow_bin)
-
-            server_wrapper = (project / ".teamflow/bin/server").read_text(encoding="utf-8")
-            self.assertIn("server.ts", server_wrapper)
-            self.assertIn("bun", server_wrapper)
 
 
 def http_get_raw(url, timeout=5.0):

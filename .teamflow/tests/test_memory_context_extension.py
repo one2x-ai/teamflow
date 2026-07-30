@@ -15,7 +15,7 @@ the new file, that ``doctor.sh`` validates it, and that ``README.md``
 documents it.
 
 All paths are relative to the repository root
-``ROOT = Path(__file__).resolve().parents[1]``.
+``ROOT = Path(__file__).resolve().parents[2]``.
 """
 
 import json
@@ -28,7 +28,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 WRAPPER = ROOT / ".teamflow" / "bin" / "teamflow"
 EXTENSION_FILE = (
     ROOT / ".teamflow" / "extensions" / "memory-context" / "index.ts"

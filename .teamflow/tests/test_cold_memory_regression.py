@@ -10,7 +10,7 @@ These tests pin the cold-memory regression fix that:
     Git-derived slug; taskId falls back to ``"_adhoc"``).
 
 All paths are relative to the repository root
-``ROOT = Path(__file__).resolve().parents[1]``.
+``ROOT = Path(__file__).resolve().parents[2]``.
 """
 
 import json
@@ -23,7 +23,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 EXTENSION_FILE = ROOT / ".teamflow" / "extensions" / "memory-context" / "index.ts"
 FILE_COLD_STORE_FILE = (

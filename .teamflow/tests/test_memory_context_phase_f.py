@@ -67,7 +67,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 TURN_INDEX_FILE = (
     ROOT / ".teamflow" / "extensions" / "memory-context" / "turn-index.ts"

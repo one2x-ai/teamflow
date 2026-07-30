@@ -18,7 +18,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 SKILL = ROOT / ".teamflow" / "skills" / "observe-inner-loop" / "SKILL.md"
 SHARED_RULES = ROOT / ".teamflow" / "AGENTS.md"
 DOCTOR = ROOT / "scripts" / "doctor.sh"

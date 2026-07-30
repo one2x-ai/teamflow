@@ -17,7 +17,7 @@ Open questions (assumptions encoded below):
   the file.
 
 All paths are relative to the repository root
-``ROOT = Path(__file__).resolve().parents[1]``.
+``ROOT = Path(__file__).resolve().parents[2]``.
 """
 
 import json
@@ -29,7 +29,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 WRAPPER = ROOT / ".teamflow" / "bin" / "teamflow"
 EXTENSION_FILE = ROOT / ".teamflow" / "extensions" / "teamflow-task" / "index.ts"
 

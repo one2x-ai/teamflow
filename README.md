@@ -317,6 +317,26 @@ teamflow memory-capture --receipt .teamflow/runs/task-receipts/<run-id>/receipt.
 
 记忆策略：先搜索、后验证，只在全部质量门 PASS 后写入；禁止保存密钥、隐私数据、原始对话、完整日志或未验证猜测。
 
+## 测试布局
+
+测试跟随被测代码所在位置，分三层：
+
+```text
+tests/             # 测 scripts/：install、uninstall、wrapper 装配、命名空间与清理守卫
+.teamflow/tests/   # 测可安装运行时：agents、extensions、skills、bin
+server/tests/      # 测 Bun HTTP 记忆浏览服务
+```
+
+运行：
+
+```bash
+python -m pytest tests .teamflow/tests server/tests   # 全部 Python 测试
+python -m pytest .teamflow/tests                      # 只测运行时
+cd server && bun run typecheck                        # server 类型检查
+```
+
+`.teamflow/tests/` 与 `server/tests/` 都**不会**被安装到业务项目：前者不在 `install.sh` 的 `FILES` 白名单也不在其 `find` 路径中，后者由 `find server ... ! -path '*/tests/*'` 显式剪除。`tests/test_test_layout.py` 固化这两条约束，并校验搬移后的模块仍以正确深度解析仓库根。
+
 ## 维护与诊断
 
 查看工作流实际发现的 Agent 和 Skill：
@@ -349,8 +369,11 @@ teamflow debug skill
 │   ├── AGENTS.md
 │   ├── agents/
 │   ├── skills/
-│   └── bin/
+│   ├── bin/
+│   └── tests/             # 运行时自身测试（不安装）
 ├── server/                # Bun + TypeScript 只读记忆浏览服务源码（仓库级例外）
+│   └── tests/             # server 自身测试（不安装）
+├── tests/                 # scripts/ 的测试
 └── scripts/
     ├── bootstrap.sh       # 安装运行时与全局入口
     ├── doctor.sh          # 环境与安装诊断

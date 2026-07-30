@@ -55,6 +55,7 @@ Do not hand off vague requests such as "fix it" or "make tests pass".
 - Run `teamflow source-check` after code edits to reject accidental non-printing control bytes.
 - Keep target-project integration limited to the standard `.teamflow/` entry in `.gitignore`; do not scatter runtime files across the repository root.
 - Keep Agent prompts and Skills concise; put shared policy here instead of duplicating it.
+- Put a test next to the code it exercises: `tests/` for `scripts/`, `.teamflow/tests/` for the installable runtime, `server/tests/` for the Bun service. Neither `.teamflow/tests/` nor `server/tests/` may ship to a target project.
 
 ## External loop observation
 

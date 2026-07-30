@@ -75,7 +75,7 @@ while IFS= read -r relative_path; do FILES+=("$relative_path"); done < <(
 while IFS= read -r relative_path; do FILES+=(".teamflow/$relative_path"); done < <(
   cd "$SOURCE_ROOT"
   find server -type f ! -path '*/node_modules/*' ! -name 'bun.lock' ! -name 'bun.lockb' \
-    ! -path '*/__pycache__/*' ! -name '*.pyc' -print | sort
+    ! -path '*/tests/*' ! -path '*/__pycache__/*' ! -name '*.pyc' -print | sort
 )
 
 MANIFEST_PATH="$TARGET_ROOT/.teamflow/manifest.json"

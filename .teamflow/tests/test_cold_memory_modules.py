@@ -21,7 +21,7 @@ Wiring tests verify that ``init-project.sh`` ships all three files,
 that ``doctor.sh`` checks them, and that ``README.md`` documents them.
 
 All paths are relative to the repository root
-``ROOT = Path(__file__).resolve().parents[1]``.
+``ROOT = Path(__file__).resolve().parents[2]``.
 """
 
 import json
@@ -33,7 +33,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 TURN_BLOCK_FILE = (
     ROOT / ".teamflow" / "extensions" / "memory-context" / "turn-block.ts"
