@@ -9,7 +9,7 @@ TEAMFLOW_HOME="${TEAMFLOW_HOME:-$HOME/.teamflow}"
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/install [--dry-run] [--force] <target-project>
+Usage: ./scripts/install.sh [--dry-run] [--force] <target-project>
 
 Install or update the current Teamflow runtime in an existing Git project.
 Managed files stay below .teamflow/; the only root change is .gitignore.
@@ -115,7 +115,7 @@ if [[ "$DRY_RUN" == true ]]; then
   exit 0
 fi
 
-"$SOURCE_ROOT/scripts/setup" >/dev/null
+"$SOURCE_ROOT/scripts/setup.sh" >/dev/null
 
 BACKUP_ROOT=""
 if (( ${#CONFLICTS[@]} > 0 )); then

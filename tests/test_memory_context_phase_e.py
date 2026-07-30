@@ -72,7 +72,7 @@ EXTENSION_FILE = (
 README_FILE = ROOT / "README.md"
 DESIGN_DOC = ROOT / "docs" / "teamflow-memory-context-design.md"
 DOCTOR_FILE = ROOT / "scripts" / "doctor.sh"
-INIT_FILE = ROOT / "scripts" / "install"
+INIT_FILE = ROOT / "scripts" / "install.sh"
 
 RULE_CACHE_ABS = str(RULE_CACHE_FILE)
 RULE_CACHE_REDUCER_ABS = str(RULE_CACHE_REDUCER_FILE)

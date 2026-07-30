@@ -14,7 +14,7 @@ PROJECT_INPUT=""
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/uninstall [--project <path>] [--memory] [--dry-run]
+Usage: ./scripts/uninstall.sh [--project <path>] [--memory] [--dry-run]
 
 Remove Teamflow install traces.
 

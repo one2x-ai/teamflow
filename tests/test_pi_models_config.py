@@ -22,7 +22,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MODELS_PATH = ROOT / ".teamflow" / "models.json"
 AGENTS_DIR = ROOT / ".teamflow" / "agents"
-INIT_SCRIPT = ROOT / "scripts" / "install"
+INIT_SCRIPT = ROOT / "scripts" / "install.sh"
 
 # Mirror tests/test_pi_wrapper.py: a long base64-ish or hex run is treated as a
 # literal secret token and must never appear in models.json.
@@ -337,7 +337,7 @@ class _IsolatedTools:
 
     def initialize(self, project):
         return subprocess.run(
-            [str(ROOT / "scripts/install"), str(project)],
+            [str(ROOT / "scripts/install.sh"), str(project)],
             cwd=ROOT,
             env=self._base_env(),
             text=True,

@@ -31,11 +31,11 @@ SCRIPTS = ROOT / "scripts"
 AGENTS_MD = ROOT / "AGENTS.md"
 README_MD = ROOT / "README.md"
 BOOTSTRAP = SCRIPTS / "bootstrap.sh"
-SETUP_MEMORY = SCRIPTS / "setup"
-INIT_PROJECT = SCRIPTS / "install"
+SETUP_MEMORY = SCRIPTS / "setup.sh"
+INIT_PROJECT = SCRIPTS / "install.sh"
 DOCTOR = SCRIPTS / "doctor.sh"
 TEAMFLOW_CLI = ROOT / ".teamflow" / "bin" / "teamflow"
-PRUNE_RUNS = SCRIPTS / "clean"
+PRUNE_RUNS = SCRIPTS / "clean.py"
 
 LEGACY_ENV_TOKENS = (
     "WORKFLOW_HOME",

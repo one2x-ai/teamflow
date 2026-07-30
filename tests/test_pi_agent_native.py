@@ -28,7 +28,7 @@ PI_RUNTIME = ROOT / ".teamflow" / "bin" / "pi-runtime"
 WRAPPER = ROOT / ".teamflow" / "bin" / "teamflow"
 EXTENSION_FILE = ROOT / ".teamflow" / "extensions" / "teamflow-task" / "index.ts"
 AGENTS_DIR = ROOT / ".teamflow" / "agents"
-INIT_SCRIPT = ROOT / "scripts" / "install"
+INIT_SCRIPT = ROOT / "scripts" / "install.sh"
 DOCTOR_SCRIPT = ROOT / "scripts" / "doctor.sh"
 README = ROOT / "README.md"
 

@@ -24,7 +24,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPTS = ROOT / "scripts"
 
-NEW_NAMES = ("install", "uninstall", "setup", "update", "clean")
+NEW_NAMES = ("install.sh", "uninstall.sh", "setup.sh", "update.sh", "clean.py")
 RETIRED_NAMES = (
     "init-project.sh",
     "setup-memory.sh",
@@ -105,7 +105,7 @@ class UninstallScopeTests(unittest.TestCase):
     """Contract 3: uninstall cleans global traces, optionally a project."""
 
     def setUp(self):
-        self.text = read(SCRIPTS / "uninstall")
+        self.text = read(SCRIPTS / "uninstall.sh")
 
     def test_removes_global_launcher(self):
         self.assertRegex(
@@ -159,7 +159,7 @@ class UninstallSafetyTests(unittest.TestCase):
     """Contract 4: uninstall is non-surprising and reversible in intent."""
 
     def setUp(self):
-        self.text = read(SCRIPTS / "uninstall")
+        self.text = read(SCRIPTS / "uninstall.sh")
 
     def test_has_usage_help(self):
         self.assertRegex(self.text, r"-h\|--help|--help\)")
@@ -201,7 +201,7 @@ class CleanScriptTests(unittest.TestCase):
     """clean keeps its disposable-only deletion contract after the rename."""
 
     def setUp(self):
-        self.text = read(SCRIPTS / "clean")
+        self.text = read(SCRIPTS / "clean.py")
 
     def test_deletes_only_disposable_suffixes(self):
         self.assertIn(".ndjson", self.text)

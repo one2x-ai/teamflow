@@ -11,7 +11,7 @@ APPLY=false
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/update [options]
+Usage: ./scripts/update.sh [options]
 
 Download current official Basic Memory Skills and prepare a descriptive update
 prompt that converts them into this repository's CLI-only variants.
@@ -128,7 +128,7 @@ Acceptance checks:
 - No MCP text remains in the four local target files.
 - No underscore-style tool invocation remains.
 - All four folders pass the Skill frontmatter validator.
-- `bash -n scripts/*.sh scripts/install scripts/setup scripts/update scripts/uninstall .teamflow/bin/*` and `git diff --check` pass.
+- `bash -n scripts/*.sh .teamflow/bin/*` and `git diff --check` pass.
 - Summarize upstream behavior adopted, behavior intentionally omitted, and all
   validation evidence.
 EOF
@@ -165,7 +165,7 @@ for (const file of process.argv.slice(2)) {
 }
 NODE
 
-  bash -n scripts/*.sh scripts/install scripts/setup scripts/update scripts/uninstall .teamflow/bin/*
+  bash -n scripts/*.sh .teamflow/bin/*
   git diff --check
   echo "CLI-only Skill update validation passed."
 else

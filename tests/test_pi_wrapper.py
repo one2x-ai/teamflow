@@ -399,7 +399,7 @@ class InstallerFootprintTests(unittest.TestCase):
     """The installer ships the runtime files below ``.teamflow/`` only."""
 
     def setUp(self):
-        self.init_script = (ROOT / "scripts/install").read_text(encoding="utf-8")
+        self.init_script = (ROOT / "scripts/install.sh").read_text(encoding="utf-8")
 
     def test_files_list_includes_new_runtime_artifacts(self):
         match = re.search(r'\nFILES=\(\n(.*?)\n\)', self.init_script, re.DOTALL)
@@ -510,7 +510,7 @@ class _IsolatedTools:
 
     def initialize(self, project):
         return subprocess.run(
-            [str(ROOT / "scripts/install"), str(project)],
+            [str(ROOT / "scripts/install.sh"), str(project)],
             cwd=ROOT,
             env=self._base_env(),
             text=True,

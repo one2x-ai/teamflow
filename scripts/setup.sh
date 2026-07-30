@@ -16,7 +16,7 @@ export BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=false
 
 usage() {
   cat <<'EOF'
-Usage: ./scripts/setup [--project NAME]
+Usage: ./scripts/setup.sh [--project NAME]
 
 Initialize shared cross-project memory under ~/.teamflow/memory:
   knowledge/  Markdown source files

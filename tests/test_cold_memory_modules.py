@@ -116,7 +116,7 @@ class _IsolatedTools:
 
     def initialize(self, project):
         return subprocess.run(
-            [str(ROOT / "scripts" / "install"), str(project)],
+            [str(ROOT / "scripts" / "install.sh"), str(project)],
             cwd=ROOT,
             env=self._base_env(),
             text=True,
@@ -758,7 +758,7 @@ class InstallerWiringTests(unittest.TestCase):
 
     def setUp(self):
         self.init_script = (
-            (ROOT / "scripts" / "install").read_text(
+            (ROOT / "scripts" / "install.sh").read_text(
                 encoding="utf-8"
             )
         )

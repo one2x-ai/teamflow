@@ -169,7 +169,7 @@ class PiInitProjectTests(unittest.TestCase):
     """F5: init-project command gate lists pi; footprint stays under .teamflow/."""
 
     def test_command_presence_gate_lists_pi_not_opencode(self):
-        initializer = (ROOT / "scripts/install").read_text(encoding="utf-8")
+        initializer = (ROOT / "scripts/install.sh").read_text(encoding="utf-8")
         match = re.search(r'for command_name in ([^\n]+)', initializer)
         self.assertIsNotNone(match, "command-presence gate must exist")
         gate = match.group(1)
@@ -179,7 +179,7 @@ class PiInitProjectTests(unittest.TestCase):
         self.assertNotIn("opencode", gate)
 
     def test_install_footprint_remains_under_teamflow(self):
-        initializer = (ROOT / "scripts/install").read_text(encoding="utf-8")
+        initializer = (ROOT / "scripts/install.sh").read_text(encoding="utf-8")
         self.assertIn(".teamflow/", initializer)
 
 

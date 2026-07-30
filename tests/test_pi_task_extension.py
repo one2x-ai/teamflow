@@ -191,7 +191,7 @@ class InstallerExtensionTests(unittest.TestCase):
     """Contract 6: the installer ships the extension file under .teamflow/."""
 
     def setUp(self):
-        self.init_script = (ROOT / "scripts/install").read_text(encoding="utf-8")
+        self.init_script = (ROOT / "scripts/install.sh").read_text(encoding="utf-8")
 
     def test_init_script_references_extension(self):
         self.assertIn("extensions/teamflow-task", self.init_script)
@@ -285,7 +285,7 @@ class _IsolatedTools:
 
     def initialize(self, project):
         return subprocess.run(
-            [str(ROOT / "scripts/install"), str(project)],
+            [str(ROOT / "scripts/install.sh"), str(project)],
             cwd=ROOT,
             env=self._base_env(),
             text=True,

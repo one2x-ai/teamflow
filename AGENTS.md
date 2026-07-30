@@ -81,5 +81,5 @@ When changing Agent models, permissions, Teamflow phase order, environment varia
 3. Update `.teamflow/AGENTS.md` shared constraints when frontmatter contracts change.
 4. Run `./scripts/doctor.sh`.
 5. Confirm all project Agents and Skills appear in `teamflow debug` output.
-6. Dry-run `./scripts/install` against a disposable Git project when installable files change.
-7. Keep the four Basic Memory Skills CLI-only; use `./scripts/update` to prepare upstream refreshes.
+6. Dry-run `./scripts/install.sh` against a disposable Git project when installable files change.
+7. Keep the four Basic Memory Skills CLI-only; use `./scripts/update.sh` to prepare upstream refreshes.

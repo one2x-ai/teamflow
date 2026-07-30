@@ -75,7 +75,7 @@ exit 0
 
     def initialize(self, project: Path, *arguments: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
-            [str(ROOT / "scripts/install"), *arguments, str(project)],
+            [str(ROOT / "scripts/install.sh"), *arguments, str(project)],
             cwd=ROOT,
             env=self.environment(),
             text=True,
@@ -113,8 +113,8 @@ class PublicNamespaceTests(unittest.TestCase):
 
         sources = [
             ROOT / "scripts/bootstrap.sh",
-            ROOT / "scripts/install",
-            ROOT / "scripts/setup",
+            ROOT / "scripts/install.sh",
+            ROOT / "scripts/setup.sh",
             ROOT / "scripts/doctor.sh",
             ROOT / "scripts/teamflow",
             ROOT / ".teamflow/bin/teamflow",
