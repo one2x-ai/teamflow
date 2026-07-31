@@ -209,21 +209,12 @@ else
   install -m 0755 "$SOURCE_ROOT/scripts/teamflow" "$LAUNCHER_PATH"
 fi
 
-# Keep the single global memory-browser copy current. It is shared by every
-# project rather than installed into any of them.
-SERVER_TARGET="$TEAMFLOW_HOME/server"
-if [[ -d "$SOURCE_ROOT/server" ]]; then
-  mkdir -p "$SERVER_TARGET"
-  while IFS= read -r relative_path; do
-    mkdir -p "$SERVER_TARGET/$(dirname "$relative_path")"
-    install -m 0644 "$SOURCE_ROOT/server/$relative_path" "$SERVER_TARGET/$relative_path"
-  done < <(
-    cd "$SOURCE_ROOT/server"
-    find . -type f ! -path './node_modules/*' ! -path './tests/*' \
-      ! -path './dist/*' ! -name 'bun.lock' ! -name 'bun.lockb' \
-      ! -path '*/__pycache__/*' ! -name '*.pyc' -print | sed 's#^\./##' | sort
-  )
-fi
+# The memory browser is not this script's concern. `server/` is a single
+# global tool shared by every project, installed and built by bootstrap.sh;
+# this script only copies the per-project `.teamflow/` runtime that starts
+# the pi agents. Syncing or building the server here would couple two
+# independent concerns and make every project install pay for a front-end
+# build it does not use.
 
 VALIDATION_HOME="${TMPDIR:-/tmp}/agent-teamflow-init-validation"
 mkdir -p "$VALIDATION_HOME"

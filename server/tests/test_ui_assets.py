@@ -209,15 +209,31 @@ class NoBuildStepInServingPathTests(unittest.TestCase):
                 "npm dependency",
             )
 
-    def test_no_build_script_is_offered(self):
-        """No `build` script, so nobody mistakes output for what ships."""
+    def test_build_script_only_builds_the_web_frontend(self):
+        """A build script may exist, but only for web/dist prebuilt assets.
+
+        Phase B added a `build` script that produces server/web/dist for the
+        static SPA at /app. The serving path stays build-free at request
+        time (static.ts reads files with Bun.file()), so the script must
+        never bundle the server source itself.
+        """
         package = read(SERVER / "package.json")
         scripts = re.search(r'"scripts"\s*:\s*\{(.*?)\}', package, re.S)
         self.assertIsNotNone(scripts)
-        self.assertNotRegex(
-            scripts.group(1),
-            r'"build"\s*:',
-            "a build script would imply the server serves bundled output",
+        build_match = re.search(r'"build"\s*:\s*"([^"]*)"', scripts.group(1))
+        if build_match is None:
+            self.skipTest("no build script; nothing to constrain")
+        build_script = build_match.group(1)
+        self.assertIn(
+            "web",
+            build_script,
+            "the build script must only build the web front end (web/dist)",
+        )
+        self.assertNotIn(
+            "src/",
+            build_script,
+            "the build script must not bundle server source; the server runs "
+            "TypeScript directly at request time",
         )
 
     def test_preview_reuses_the_shipped_fragments(self):

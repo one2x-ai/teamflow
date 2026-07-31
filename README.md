@@ -269,7 +269,7 @@ teamflow server --dir ../try/mcap
 - 具有可见的加载、空结果与错误状态。
 - 页面为响应式布局，适配桌面与移动端浏览器。
 
-该页面严格只读：不提供任何编辑、创建或删除控件；记忆数据全部通过 `textContent` / `setAttribute` 安全渲染，不做原始 HTML 插值；实现为零 npm 运行时依赖（仅 Bun 内置与浏览器标准 API）。
+该页面严格只读：不提供任何编辑、创建或删除控件；记忆数据全部通过 `textContent` / `setAttribute` 安全渲染，不做原始 HTML 插值；服务路径仅依赖 Bun 内置与预构建静态资源（构建期依赖仅在 teamflow 仓库内需要）。
 
 服务不提供任何写入、编辑或删除端点；非 GET 请求一律返回 405。
 
@@ -309,7 +309,7 @@ teamflow memory-capture --receipt .teamflow/runs/task-receipts/<run-id>/receipt.
 
 `teamflow server` 的实现是 Bun + TypeScript，源码位于仓库根目录 `server/`（"实现集中在 `.teamflow/`" 原则的唯一文档化例外）。它读取的是跨项目共享记忆库，不是项目数据，因此**不按项目安装**：`bootstrap.sh` 与 `install.sh` 只把它同步到全局 `~/.teamflow/server/` 一份，业务项目只收到瘦包装 `.teamflow/bin/server`。包装器按 `TEAMFLOW_SERVER_DIR` → `$TEAMFLOW_HOME/server` → `<repo>/server` 顺序定位源码，找不到时给出明确诊断而非静默失败。
 
-服务使用 `Bun.serve`，运行时只依赖 Bun 内置与标准 API（零 npm 运行时依赖），并通过 `--local` 调用本机已有的 `basic-memory` CLI 读取记忆；不使用 MCP、云同步、账号或密钥。
+服务使用 `Bun.serve`，运行时只依赖 Bun 内置与标准 API（服务路径无 npm 运行时依赖，构建期依赖仅在仓库内），并通过 `--local` 调用本机已有的 `basic-memory` CLI 读取记忆；不使用 MCP、云同步、账号或密钥。
 
 后端按职责拆分为模块，`server.ts` 只做装配（详见 `docs/teamflow-web-console-design.md`）：
 

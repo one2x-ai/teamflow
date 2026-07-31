@@ -173,6 +173,13 @@ for runtime_command in teamflow memory memory-capture test-patch server; do
   fi
 done
 
+# Verify the built web front end exists (built by bootstrap.sh/install.sh).
+if [[ -d "$ROOT_DIR/server/web/dist" ]]; then
+  pass "web front-end build output exists"
+else
+  fail "server/web/dist is missing; run 'cd server && bun run build' or ./scripts/bootstrap.sh"
+fi
+
 for experiment_command in memory-experiment memory-compare; do
   if [[ -x ".teamflow/experiments/bin/$experiment_command" ]]; then
     pass "experimental command $experiment_command is isolated from the public bin"

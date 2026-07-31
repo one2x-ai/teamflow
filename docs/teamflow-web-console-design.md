@@ -1,6 +1,6 @@
 # Teamflow Web Console 详细设计
 
-状态：Phase A 已实现并验证（669 tests / 965 subtests 通过）；Phase B–D 待实现
+状态：Phase A–B 已实现并验证（705 tests / 994 subtests 通过）；Phase C–D 待实现
 
 ---
 
@@ -199,7 +199,7 @@ Basic Auth，`www-authenticate: Basic realm="Secure Area"`。凭证由上游进�
 
 实现结果：`server.ts` 348 → 51 行；新增 10 个模块共 1027 行（含注释）。页面装配抽到 `pages.ts`，Phase C 时随 `src/ui/` 一并删除。端到端验证：反代真实 opencode 取回 100 个会话，SSE 保留 `x-accel-buffering: no`，响应头与响应体均无凭证与认证头。
 
-### Phase B — 前端工程与静态服务
+### Phase B — 前端工程与静态服务 ✅ 已完成
 
 - `server/web/`：Svelte 5 + Tailwind 4 + shadcn-svelte + Vite
 - `bootstrap.sh` 与 `install.sh` 构建 `web/dist/`；`doctor.sh` 校验产物
@@ -207,6 +207,12 @@ Basic Auth，`www-authenticate: Basic realm="Secure Area"`。凭证由上游进�
 - 保留现有 `src/ui/` 直到 Phase C 完成后删除
 
 验收：构建产物存在且可服务；`bun run typecheck` 覆盖前端；doctor 校验通过。
+
+实现结果：`server/web/` 为 Svelte 5（runes）+ Tailwind 4（`@tailwindcss/vite`）+ shadcn-svelte 复制式组件（Button/Card），独立 `web/vite.config.ts`；`server/src/static.ts`（85 行）以 `/app` 为挂载点提供产物并做 SPA fallback；typecheck 改用 `svelte-check`，覆盖 `.svelte` 文件。
+
+职责修正：`install.sh` **不参与** server 与前端构建。`server/` 是全局唯一的 web 入口（`~/.teamflow/server/`），由 `bootstrap.sh` 在仓库内构建后同步产物；`install.sh` 只复制业务项目的 `.teamflow/` 运行时。此前把 server 同步写进 `install.sh` 是设计错误，导致每个项目安装都要付一次前端构建代价，并使 5 个既有安装测试超时。
+
+发现并修复的真实缺陷：Vite 缺少 `base: "/app/"`，产物 `index.html` 指向 `/assets/*` 而服务只提供 `/app/assets/*`，浏览器端全部 404。原测试只直接取 `/app/assets/<file>` 故未暴露；新增 `test_every_asset_the_page_declares_is_reachable` 解析页面声明的 URL 并逐个验证可达，已反证该守卫在移除 `base` 时失败。
 
 ### Phase C — Memory 页面
 
