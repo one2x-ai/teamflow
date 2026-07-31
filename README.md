@@ -311,21 +311,48 @@ teamflow memory-capture --receipt .teamflow/runs/task-receipts/<run-id>/receipt.
 
 服务使用 `Bun.serve`，运行时只依赖 Bun 内置与标准 API（零 npm 运行时依赖），并通过 `--local` 调用本机已有的 `basic-memory` CLI 读取记忆；不使用 MCP、云同步、账号或密钥。
 
-前端按页面拆分为独立资源，避免把 HTML/CSS/JS 堆在一个 TS 文件里：
+后端按职责拆分为模块，`server.ts` 只做装配（详见 `docs/teamflow-web-console-design.md`）：
 
 ```text
 server/src/
-├── server.ts          # 路由、basic-memory 调用、页面装配（348 行）
-└── ui/
-    ├── list.html      # 列表页结构（片段，不含 doctype/head）
-    ├── list.css
-    ├── list.js
-    ├── detail.html
-    ├── detail.css
-    └── detail.js
+├── server.ts              # 装配路由（51 行）
+├── config.ts              # CLI/env 解析
+├── http/{router,response}.ts
+├── memory/
+│   ├── basic-memory.ts    # CLI 封装
+│   ├── scope.ts           # --dir 仓库 slug 过滤
+│   └── routes.ts          # /api/memories、/api/memory
+├── opencode/
+│   ├── config.ts          # 上游 URL 与凭证解析
+│   ├── types.ts           # Session/Message/Part（与前端共享）
+│   └── proxy.ts           # /api/oc/* 反向代理（SSE 透传）
+├── pages.ts               # 过渡期页面装配
+└── ui/                    # 按页面拆分的 html/css/js
 ```
 
-`server.ts` 的 `renderPage()` 在请求时读取这三个资源并包进文档外壳。服务路径**没有构建步骤**——`bin/server` 直接用 Bun 跑 TypeScript 源码，新克隆与全局安装都无需 build。
+服务路径**没有构建步骤**——`bin/server` 直接用 Bun 跑 TypeScript 源码，新克隆与全局安装都无需 build。
+
+### 集成 opencode 会话
+
+`opencode` 是外层 loop，跟随持久化任务会话、自己管自己的生命周期；teamflow 只**连接**已运行的实例，不拉起也不停止它。
+
+```bash
+# 先启动 opencode（凭证必须显式指定，否则它每次随机生成）
+OPENCODE_SERVER_USERNAME=tf OPENCODE_SERVER_PASSWORD=<secret> \
+  opencode serve --port 7396
+
+# 再启动 teamflow server，指向它
+TEAMFLOW_OPENCODE_URL=http://127.0.0.1:7396 \
+TEAMFLOW_OPENCODE_USERNAME=tf \
+TEAMFLOW_OPENCODE_PASSWORD=<secret> \
+  teamflow server
+```
+
+也可用 `--opencode-url` / `--opencode-user` / `--opencode-password`，优先级高于环境变量。
+
+`/api/oc/*` 是**服务端反向代理**：浏览器只面对 teamflow 一个源，opencode 的 Basic Auth 凭证留在服务端进程内，绝不下发到浏览器（响应头与响应体均已由测试断言无凭证）。SSE（`/api/oc/event`）流式透传、不缓冲，客户端断开时关闭上游连接。
+
+未配置 opencode 时服务照常启动，仅 `/api/oc/*` 返回结构化 503（含 `reason` 与 `detail`），记忆浏览不受影响。
 
 Vite 只用于前端本地迭代，产物不参与服务：
 
@@ -345,6 +372,7 @@ bun run typecheck
 - `TEAMFLOW_MEMORY_HOME`：默认 `$TEAMFLOW_HOME/memory`
 - `TEAMFLOW_MEMORY_PROJECT`：默认 `teamflow`
 - `TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS`：默认不设置，即不启用本地 wall-time。
+- `TEAMFLOW_OPENCODE_URL` / `TEAMFLOW_OPENCODE_USERNAME` / `TEAMFLOW_OPENCODE_PASSWORD`：默认不设置，即 `/api/oc/*` 返回 503，记忆浏览不受影响。
 
 记忆策略：先搜索、后验证，只在全部质量门 PASS 后写入；禁止保存密钥、隐私数据、原始对话、完整日志或未验证猜测。
 

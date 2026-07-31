@@ -28,6 +28,8 @@ SERVER = ROOT / "server"
 SRC = SERVER / "src"
 UI = SRC / "ui"
 SERVER_TS = SRC / "server.ts"
+# Phase A moved page assembly out of the entrypoint into its own module.
+PAGES_TS = SRC / "pages.ts"
 
 PAGES = ("list", "detail")
 ASSET_SUFFIXES = ("html", "css", "js")
@@ -83,10 +85,15 @@ class UiAssetLayoutTests(unittest.TestCase):
 
 
 class ServerNoLongerInlinesMarkupTests(unittest.TestCase):
-    """server.ts routes and assembles; it does not embed page bodies."""
+    """The assembler wraps assets; it does not embed page bodies.
+
+    Phase A extracted page assembly from server.ts into pages.ts, so the
+    shell assertions target that module. server.ts is checked separately for
+    staying assembly-only.
+    """
 
     def setUp(self):
-        self.text = read(SERVER_TS)
+        self.text = read(PAGES_TS)
 
     def test_server_has_no_inline_style_or_script_blocks(self):
         """The shell may open <style>/<script>; the content must be injected.
@@ -128,12 +135,26 @@ class ServerNoLongerInlinesMarkupTests(unittest.TestCase):
         self.assertRegex(
             self.text,
             r"ui/|UI_DIR|readAsset|loadAsset",
-            "server.ts must load page assets from server/src/ui/",
+            "the assembler must load page assets from server/src/ui/",
+        )
+
+    def test_entrypoint_delegates_page_rendering(self):
+        """server.ts must route to the assembler, not render inline."""
+        entry = read(SERVER_TS)
+        self.assertRegex(
+            entry,
+            r'from "\./pages"',
+            "server.ts must import the page assembler",
+        )
+        self.assertNotIn(
+            "<!DOCTYPE",
+            entry,
+            "the entrypoint must not build documents itself",
         )
 
     def test_server_module_is_smaller(self):
-        """Extracting ~380 lines of markup should show up as a real shrink."""
-        line_count = len(self.text.splitlines())
+        """Extracting markup and modules should show up as a real shrink."""
+        line_count = len(read(SERVER_TS).splitlines())
         self.assertLess(
             line_count,
             400,
@@ -157,11 +178,13 @@ class NoBuildStepInServingPathTests(unittest.TestCase):
                 )
 
     def test_server_does_not_read_build_output(self):
-        self.assertNotIn(
-            "dist/",
-            read(SERVER_TS),
-            "server.ts must serve source assets, not bundler output",
-        )
+        for module in (SERVER_TS, PAGES_TS):
+            with self.subTest(module=module.name):
+                self.assertNotIn(
+                    "dist/",
+                    read(module),
+                    f"{module.name} must serve source assets, not bundler output",
+                )
 
     def test_vite_output_is_not_committed(self):
         gitignore = read(ROOT / ".gitignore")
