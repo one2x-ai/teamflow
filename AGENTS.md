@@ -2,6 +2,12 @@
 
 This repository defines and evolves Teamflow, a multi-agent coding system.
 
+## Architectural self-consistency
+
+Any change to this repository — product code, tests, scripts, prompts, or documentation — goes through teamflow's agents. An outer loop may write the handoff, observe phase metadata, verify artifacts, and commit; it may not implement, fix, or refactor. When a delegation returns something wrong, the outer loop collects the failure receipt and delegates again. This exercises the process on itself so defects surface here, not in business projects.
+
+Narrow exceptions: writing or correcting the handoff itself; reverting a bad change with git; temporarily breaking something to prove a test fails, then restoring it (verification, not implementation); emergency recovery when the agent path itself is broken — say so in the report.
+
 ## Roles
 
 - `planner` uses GLM-5.2 and owns requirement analysis, acceptance criteria, delegation, and the final summary.

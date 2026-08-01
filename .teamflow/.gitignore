@@ -8,7 +8,9 @@
 # so a fresh clone must inherit them. It is not part of the installer's
 # managed file set, so it never reaches a business project.
 
-# Local build state
+# Safety net only: this directory is not an npm project. Extensions resolve
+# their dependencies through Pi's own installation. If these files appear,
+# tests/test_runtime_content_ownership.py::TeamflowDirectoryIsNotNpmProjectTests fails.
 node_modules
 package.json
 package-lock.json

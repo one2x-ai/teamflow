@@ -17,6 +17,7 @@ Contracts:
 
 import json
 import os
+import re
 import subprocess
 import tempfile
 import unittest
@@ -309,6 +310,84 @@ class InstallerRemovesOrphansTests(unittest.TestCase):
                 "a user-modified stale file must be preserved, not deleted",
             )
             self.assertIn("user edited this", orphan_path.read_text(encoding="utf-8"))
+
+
+class TeamflowDirectoryIsNotNpmProjectTests(unittest.TestCase):
+    """``.teamflow/`` must not become an npm project.
+
+    At one point ``.teamflow/`` carried a ``package.json`` declaring
+    ``@opencode-ai/plugin`` plus a 61 MB ``node_modules`` (46 MB of it
+    ``effect``).  Nothing imported any of it: extensions import only
+    ``@earendil-works/*``, ``typebox``, ``node:*``, and relative modules,
+    which Pi resolves from its own global installation.  These files were
+    removed.  This test prevents them from returning.
+    """
+
+    def test_no_package_json(self):
+        self.assertFalse(
+            (ROOT / ".teamflow" / "package.json").exists(),
+            ".teamflow/ must not carry a package.json",
+        )
+
+    def test_no_package_lock(self):
+        self.assertFalse(
+            (ROOT / ".teamflow" / "package-lock.json").exists(),
+            ".teamflow/ must not carry a package-lock.json",
+        )
+
+    def test_no_node_modules(self):
+        self.assertFalse(
+            (ROOT / ".teamflow" / "node_modules").exists(),
+            ".teamflow/ must not carry a node_modules directory",
+        )
+
+    def test_no_bun_lock(self):
+        self.assertFalse(
+            (ROOT / ".teamflow" / "bun.lock").exists(),
+            ".teamflow/ must not carry a bun.lock",
+        )
+
+    def test_extensions_imports_resolve_without_npm(self):
+        """Prove the premise: extensions never needed a local npm install.
+
+        Every import specifier in ``.teamflow/extensions/**/*.ts`` must
+        resolve through Pi's own installation or relative paths — never
+        through a local ``node_modules``.  If an extension ever adopts a
+        dependency outside this allow-list, this test flags that the
+        no-npm rule needs revisiting.
+        """
+        import_patterns = (
+            re.compile(r'from\s+"([^"]+)"'),
+            re.compile(r"from\s+'([^']+)"),
+        )
+        offenders = []
+        for path in (ROOT / ".teamflow" / "extensions").rglob("*.ts"):
+            if "node_modules" in path.parts:
+                continue
+            source = path.read_text(encoding="utf-8")
+            for pattern in import_patterns:
+                for match in pattern.finditer(source):
+                    specifier = match.group(1)
+                    if (
+                        specifier.startswith("@earendil-works/")
+                        or specifier == "typebox"
+                        or specifier.startswith("node:")
+                        or specifier.startswith(".")
+                    ):
+                        continue
+                    offenders.append(
+                        f"{path.relative_to(ROOT)}: {specifier!r}"
+                    )
+        # ``typebox`` resolves through Pi's installation; if that becomes
+        # incidental rather than guaranteed, this test's allowed list
+        # should be revisited.
+        self.assertEqual(
+            offenders,
+            [],
+            "extension imports must resolve without a local npm install; "
+            "if a specifier outside the allow-list is intentional, the "
+            "no-npm rule needs revisiting: " + ", ".join(offenders),
+        )
 
 
 if __name__ == "__main__":

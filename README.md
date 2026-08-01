@@ -378,7 +378,7 @@ bun run typecheck
 
 ## 运行时产物与清理
 
-`.teamflow/` 只承载 Pi agent 运行时内容（`agents/`、`skills/`、`extensions/`、`bin/`、可安装的 `server/` 源码）。以下都不进 Git，也不会被安装：
+`.teamflow/` 只承载 Pi agent 运行时内容（`agents/`、`skills/`、`extensions/`、`bin/`）。`.teamflow/` 不是 npm 项目——扩展依赖由 Pi 全局安装解析，无需 `package.json` 或 `node_modules`。以下都不进 Git，也不会被安装：
 
 ```text
 .teamflow/runs/            # 阶段收据、测试补丁、记忆管道产物、截图
@@ -386,7 +386,6 @@ bun run typecheck
 .teamflow/auth.json        # 凭证
 .teamflow/models-store.json
 .teamflow/.env
-.teamflow/node_modules/
 .teamflow/tests/           # 运行时自身测试（追踪但不安装）
 ```
 
