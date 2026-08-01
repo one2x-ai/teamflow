@@ -531,171 +531,6 @@ def http_get_raw(url, timeout=5.0):
 
 
 @unittest.skipUnless(BUN, "bun runtime is required to launch the TypeScript server")
-class MemoryServerUiTests(unittest.TestCase):
-    """Read-only interactive HTML page contract (`GET /`).
-
-    These tests assert on the served HTML text only (canonical markers, anchor
-    ids, read-only/safe-rendering guarantees). They are written BEFORE the page
-    exists and must be RED against the current 404 response.
-    """
-
-    def setUp(self):
-        self._tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self._tmp.cleanup)
-        self.fixture = ServerFixture(Path(self._tmp.name))
-        self.fixture.set_recent(make_recent_items(5))
-        self.fixture.set_search(
-            [
-                {"title": "Alpha result", "permalink": "/search/alpha"},
-                {"title": "Beta result", "permalink": "/search/beta"},
-                {"title": "Gamma result", "permalink": "/search/gamma"},
-            ],
-            total=999,
-        )
-        self.fixture.start(port=free_port())
-        self.fixture.wait_ready()
-        self.addCleanup(self.fixture.stop)
-
-    # UI1: page + branding + responsive, complete (not a stub)
-    def test_home_page_html_contract(self):
-        status, content_type, body = http_get_raw(f"{self.fixture.base_url}/")
-        with self.subTest(check="status_200"):
-            self.assertEqual(status, 200, status)
-        with self.subTest(check="content_type_text_html"):
-            self.assertTrue(content_type.startswith("text/html"), content_type)
-        with self.subTest(check="branding"):
-            self.assertIn("Teamflow Memory", body)
-        with self.subTest(check="responsive_viewport"):
-            self.assertIn('<meta name="viewport"', body)
-        with self.subTest(check="not_a_stub"):
-            self.assertGreater(len(body), 1200, len(body))
-
-    # UI2: on-load data fetch wiring
-    def test_on_load_fetch_wiring(self):
-        _, _, body = http_get_raw(f"{self.fixture.base_url}/")
-        with self.subTest(marker="/api/memories"):
-            self.assertIn("/api/memories", body)
-        with self.subTest(marker="page_size=12"):
-            self.assertIn("page_size=12", body)
-        with self.subTest(marker="page=1"):
-            self.assertIn("page=1", body)
-
-    # UI3: search form + summary anchor
-    def test_search_form_present(self):
-        _, _, body = http_get_raw(f"{self.fixture.base_url}/")
-        with self.subTest(marker="query_input"):
-            self.assertIn('name="query"', body)
-        with self.subTest(marker="form_open"):
-            self.assertIn("<form", body)
-        with self.subTest(marker="form_close"):
-            self.assertIn("</form>", body)
-        with self.subTest(marker="summary_anchor"):
-            self.assertIn('id="summary"', body)
-
-    # UI4: pagination controls
-    def test_pagination_controls_present(self):
-        _, _, body = http_get_raw(f"{self.fixture.base_url}/")
-        with self.subTest(marker="prev_btn"):
-            self.assertIn('id="prev-btn"', body)
-        with self.subTest(marker="next_btn"):
-            self.assertIn('id="next-btn"', body)
-        with self.subTest(marker="page_info"):
-            self.assertIn('id="page-info"', body)
-
-    # UI5: loading/empty/error state anchors
-    def test_state_anchors_present(self):
-        _, _, body = http_get_raw(f"{self.fixture.base_url}/")
-        for state in ("loading", "empty", "error"):
-            with self.subTest(state=state):
-                self.assertIn(f'data-state="{state}"', body)
-
-    # UI6: cards region container
-    def test_cards_region_present(self):
-        _, _, body = http_get_raw(f"{self.fixture.base_url}/")
-        with self.subTest(marker="cards_container"):
-            self.assertIn('id="cards"', body)
-
-    # UI7: read-only + safe rendering (DOM text, no innerHTML/write verbs)
-    def test_read_only_and_safe_rendering(self):
-        _, _, body = http_get_raw(f"{self.fixture.base_url}/")
-        lowered = body.lower()
-        with self.subTest(check="uses_textContent"):
-            self.assertIn("textContent", body)
-        with self.subTest(check="no_innerHTML"):
-            self.assertNotIn("innerHTML", body)
-        with self.subTest(check="no_method_post_attr"):
-            self.assertNotIn('method="post"', lowered)
-            self.assertNotIn("method='post'", lowered)
-        with self.subTest(check="no_contenteditable"):
-            self.assertNotIn("contenteditable", lowered)
-        with self.subTest(check="no_fetch_write_verbs"):
-            self.assertNotIn('method: "post"', lowered)
-            self.assertNotIn("method: 'post'", lowered)
-            self.assertNotIn('method: "put"', lowered)
-            self.assertNotIn("method: 'put'", lowered)
-            self.assertNotIn('method: "delete"', lowered)
-            self.assertNotIn("method: 'delete'", lowered)
-        with self.subTest(check="no_write_control_labels"):
-            self.assertNotIn(">delete<", lowered)
-            self.assertNotIn(">edit<", lowered)
-            self.assertNotIn(">create<", lowered)
-
-    # UI8: routing preserved alongside the new page
-    def test_routing_preserved_alongside_page(self):
-        with self.subTest(request="GET / is 200"):
-            status, _, _ = http_get_raw(f"{self.fixture.base_url}/")
-            self.assertEqual(status, 200, status)
-        with self.subTest(request="POST / is 405"):
-            status, _ = http_json("POST", f"{self.fixture.base_url}/")
-            self.assertEqual(status, 405, status)
-        with self.subTest(request="GET /no-such-path is 404"):
-            status, body = http_json("GET", f"{self.fixture.base_url}/no-such-path")
-            self.assertEqual(status, 404, status)
-            self.assertIsInstance(body, dict)
-        with self.subTest(request="GET /health still ok"):
-            status, body = http_json("GET", f"{self.fixture.base_url}/health")
-            self.assertEqual(status, 200, status)
-            self.assertEqual(body.get("status"), "ok")
-
-    # UI9: responsive form flex override
-    def test_responsive_form_flex_override(self):
-        """UI9: responsive form flex override in the <=560px media block.
-
-        At <=560px the header switches to `flex-direction: column`, which makes
-        the form's default `flex: 1 1 280px` reserve a ~280px *vertical* basis
-        and stretch the search form tall. The media block must override the
-        form's flex so it no longer reserves that 280px basis. This asserts on
-        the served HTML text only (no headless browser / computed CSS).
-        """
-        _, _, body = http_get_raw(f"{self.fixture.base_url}/")
-        marker = "@media (max-width: 560px)"
-        with self.subTest(check="media_block_present"):
-            self.assertIn(marker, body)
-        # Extract the media-block body by walking brace depth from the marker.
-        start = body.index(marker)
-        open_brace = body.index("{", start)
-        depth = 0
-        end = None
-        for index in range(open_brace, len(body)):
-            char = body[index]
-            if char == "{":
-                depth += 1
-            elif char == "}":
-                depth -= 1
-                if depth == 0:
-                    end = index + 1
-                    break
-        self.assertIsNotNone(end, "unterminated @media block")
-        media_block = body[open_brace:end]
-        with self.subTest(check="form_rule_present"):
-            self.assertIn("form", media_block)
-        with self.subTest(check="form_flex_override_present"):
-            self.assertIn("flex", media_block)
-        with self.subTest(check="no_280px_vertical_basis"):
-            self.assertNotIn("280px", media_block)
-
-
-@unittest.skipUnless(BUN, "bun runtime is required to launch the TypeScript server")
 class MemoryDetailPageTests(unittest.TestCase):
     """Clickable, read-only memory detail contract."""
 
@@ -723,27 +558,6 @@ class MemoryDetailPageTests(unittest.TestCase):
         self.fixture.start(port=free_port())
         self.fixture.wait_ready()
         self.addCleanup(self.fixture.stop)
-
-    def test_list_uses_clickable_title_without_visible_raw_permalink(self):
-        status, _, body = http_get_raw(f"{self.fixture.base_url}/")
-        self.assertEqual(status, 200)
-        self.assertIn("/memory?permalink=", body)
-        self.assertIn("encodeURIComponent(permalink)", body)
-        self.assertNotIn("link.textContent = permalink", body)
-
-    def test_detail_page_is_read_only_safe_shell(self):
-        status, content_type, body = http_get_raw(
-            f"{self.fixture.base_url}/memory?permalink={urllib.parse.quote(self.PERMALINK)}"
-        )
-        self.assertEqual(status, 200)
-        self.assertTrue(content_type.startswith("text/html"), content_type)
-        self.assertIn("Back to memories", body)
-        self.assertIn("/api/memory?permalink=", body)
-        self.assertIn('id="detail-title"', body)
-        self.assertIn('id="detail-content"', body)
-        self.assertIn("textContent", body)
-        self.assertNotIn("innerHTML", body)
-        self.assertNotIn("file_path", body)
 
     def test_detail_api_reads_note_with_exact_flags(self):
         encoded = urllib.parse.quote(self.PERMALINK)
@@ -928,12 +742,6 @@ class ScopedMemoryServerTests(unittest.TestCase):
                     item["permalink"],
                 )
 
-    # 4. scoped GET / surfaces the slug via the workspace marker
-    def test_scoped_workspace_label_visible(self):
-        status, _, body = http_get_raw(f"{self.fixture.base_url}/")
-        self.assertEqual(status, 200)
-        self.assertIn('data-workspace="mcap"', body)
-
     # 5. without --dir the workspace marker must NOT appear
     def test_scoped_unscoped_marker_absent(self):
         fixture = self._new_unscoped_fixture()
@@ -1046,8 +854,6 @@ class ScopedMemoryServerTests(unittest.TestCase):
         )
         self.addCleanup(fixture.stop)
         fixture.wait_ready()
-        _, _, body = http_get_raw(f"{fixture.base_url}/")
-        self.assertIn('data-workspace="mcap"', body)
         http_json("GET", f"{fixture.base_url}/api/memories")
         http_json("GET", f"{fixture.base_url}/api/memories?query=foo")
         calls = fixture.log.read_text(encoding="utf-8")

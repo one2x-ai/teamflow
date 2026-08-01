@@ -83,3 +83,15 @@ export function serveStatic(
     return new Response(index);
   });
 }
+
+/**
+ * Serve the built SPA shell (index.html) for client-side route entry points
+ * like GET / and GET /memory. The SPA fallback in serveStatic handles /app/*
+ * deep links; this serves the shell directly at the root.
+ */
+export async function serveAppShell(): Promise<Response> {
+  const index = Bun.file(new URL("./index.html", DIST_DIR), {
+    type: "text/html; charset=utf-8",
+  });
+  return new Response(index);
+}

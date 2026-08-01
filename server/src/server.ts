@@ -14,8 +14,7 @@ import { handleMemories, handleMemory } from "./memory/routes";
 import { resolveWorkspace, type Workspace } from "./memory/scope";
 import { resolveOpencode } from "./opencode/config";
 import { createOpencodeProxy, PROXY_PREFIX } from "./opencode/proxy";
-import { detailPage, listPage } from "./pages";
-import { serveStatic } from "./static";
+import { serveAppShell, serveStatic } from "./static";
 
 const argv = process.argv.slice(2);
 const config = resolveServerConfig(argv, process.env);
@@ -36,8 +35,7 @@ const router = new Router()
   .get("/api/memory", (_request, url) => handleMemory(url, memoryContext))
   .prefix(PROXY_PREFIX, createOpencodeProxy(opencode))
   .prefix("/app", serveStatic)
-  .get("/memory", () => detailPage(workspace))
-  .get("/", () => listPage(workspace));
+  .get(["/", "/memory"], () => serveAppShell());
 
 Bun.serve({
   port: config.port,
