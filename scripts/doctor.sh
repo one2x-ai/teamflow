@@ -180,6 +180,13 @@ else
   fail "server/web/dist is missing; run 'cd server && bun run build' or ./scripts/bootstrap.sh"
 fi
 
+# Phase C.1 collapsed server/ into one Bun context: exactly one package.json.
+if [ "$(find "$ROOT_DIR/server" -name package.json -not -path '*/node_modules/*' | wc -l)" -eq 1 ]; then
+  pass "server has a single package.json"
+else
+  fail "server should have exactly one package.json"
+fi
+
 for experiment_command in memory-experiment memory-compare; do
   if [[ -x ".teamflow/experiments/bin/$experiment_command" ]]; then
     pass "experimental command $experiment_command is isolated from the public bin"

@@ -6,6 +6,7 @@
  * the front end and its tests depend on them.
  */
 
+import type { MemoryListResponse, MemoryNote } from "../../shared/types";
 import { PAGINATION, type MemoryConfig } from "../config";
 import {
   badGateway,
@@ -27,7 +28,7 @@ export interface MemoryRouteContext {
 }
 
 /** Positive integer within an inclusive upper bound, or null when invalid. */
-function boundedInteger(raw: string, max?: number): number | null {
+export function boundedInteger(raw: string, max?: number): number | null {
   const value = Number(raw);
   if (!Number.isInteger(value) || value < 1) return null;
   if (max !== undefined && value > max) return null;
@@ -79,14 +80,15 @@ export async function handleMemories(
   }
 
   const total = candidates.length;
-  return json({
-    items: candidates.slice((page - 1) * pageSize, page * pageSize),
+  const response: MemoryListResponse = {
+    items: candidates.slice((page - 1) * pageSize, page * pageSize) as MemoryListResponse["items"],
     page,
     page_size: pageSize,
     total,
     total_pages: Math.max(1, Math.ceil(total / pageSize)),
     query,
-  });
+  };
+  return json(response);
 }
 
 export async function handleMemory(
@@ -103,7 +105,7 @@ export async function handleMemory(
   }
 
   try {
-    const memoryNote = await readNote(memory, permalink);
+    const memoryNote = (await readNote(memory, permalink)) as MemoryNote;
     if (typeof memoryNote.content === "string") {
       memoryNote.content = stripFrontmatter(memoryNote.content);
     }

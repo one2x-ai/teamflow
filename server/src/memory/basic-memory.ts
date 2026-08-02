@@ -101,5 +101,5 @@ export async function readNote(
  * note's type to decide how to present it.
  */
 export function stripFrontmatter(content: string): string {
-  return content.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n(?:\r?\n)?/, "");
+  return content.replace(/^---\r?\n(?:[\s\S]*?\r?\n)?---\r?\n(?:\r?\n)?/, "");
 }

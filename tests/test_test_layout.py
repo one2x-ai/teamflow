@@ -43,7 +43,11 @@ class TestTierLayoutTests(unittest.TestCase):
     def test_each_tier_has_tests(self):
         for tier in (OUTER_TESTS, RUNTIME_TESTS, SERVER_TESTS):
             with self.subTest(tier=tier.relative_to(ROOT)):
+                # server/tests/ migrated from pytest to bun test in Phase C.1:
+                # test modules are now *.test.ts, not test_*.py.
                 modules = sorted(tier.glob("test_*.py"))
+                if tier == SERVER_TESTS:
+                    modules.extend(sorted(tier.glob("*.test.ts")))
                 self.assertTrue(
                     modules, f"{tier} must contain at least one test module"
                 )

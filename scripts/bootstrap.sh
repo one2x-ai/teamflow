@@ -129,6 +129,7 @@ if [[ -d "$ROOT_DIR/server" ]]; then
     # lockfiles stay in the repository; web/dist is the one build artifact the
     # global copy needs in order to serve /app.
     find . -type f ! -path './node_modules/*' ! -path './tests/*' \
+      ! -name '*.test.ts' ! -path '*/__tests__/*' \
       ! -path './dist/*' ! -path './web/node_modules/*' \
       ! -name 'bun.lock' ! -name 'bun.lockb' \
       ! -path '*/__pycache__/*' ! -name '*.pyc' -print | sed 's#^\./##' | sort

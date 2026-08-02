@@ -326,11 +326,12 @@ server/src/
 │   ├── config.ts          # 上游 URL 与凭证解析
 │   ├── types.ts           # Session/Message/Part（与前端共享）
 │   └── proxy.ts           # /api/oc/* 反向代理（SSE 透传）
-├── pages.ts               # 过渡期页面装配
-└── ui/                    # 按页面拆分的 html/css/js
+└── web/                   # Svelte 前端（Vite 构建到 web/dist/，由服务静态托管）
 ```
 
-服务路径**没有构建步骤**——`bin/server` 直接用 Bun 跑 TypeScript 源码，新克隆与全局安装都无需 build。
+`server/shared/` 存放前后端共享的 API 响应类型（纯 TypeScript、零依赖），后端 `src/` 与前端 `web/` 都从这里导入。
+
+Phase C.1 起 `server/` 合并为**单一 Bun 上下文**：只有一个 `server/package.json`、一次 `bun install` 装好后端与前端全部开发依赖；`server/web/` 不再有自己的 manifest 与 lockfile。服务路径本身仍无构建步骤——`bin/server` 直接用 Bun 跑 TypeScript 源码；`bun run build` 只产出前端静态产物 `web/dist/`。
 
 ### 集成 opencode 会话
 
@@ -354,16 +355,15 @@ TEAMFLOW_OPENCODE_PASSWORD=<secret> \
 
 未配置 opencode 时服务照常启动，仅 `/api/oc/*` 返回结构化 503（含 `reason` 与 `detail`），记忆浏览不受影响。
 
-Vite 只用于前端本地迭代，产物不参与服务：
+前端是 `server/web/` 下的 Svelte 应用，经 Vite 构建后由 Bun 服务静态托管：
 
 ```bash
-cd server && bun install
-bun run dev      # 终端 1：Bun 服务在 7324，提供真实装配的页面
-bun run ui:dev   # 终端 2：Vite 在 5173，热重载资源，/api 代理到 7324
-bun run typecheck
+cd server && bun install   # 一次安装全部依赖（单一 package.json）
+bun run dev                # Bun 服务在 7324
+bun run build              # Vite 构建前端到 web/dist/
+bun run typecheck          # tsc --noEmit + svelte-check
+bun test                   # server 全部测试（纯 Bun，无 Python）
 ```
-
-`vite.config.ts` 的预览插件在请求时读取 `list.html`/`detail.html` **真实片段**再包外壳，因此预览与线上共用同一份结构，不会漂移；仓库中刻意不提供 `build` 脚本，`server/dist/` 也被 git 忽略，避免误以为构建产物是被服务的内容。
 
 可配置项：
 
@@ -413,9 +413,10 @@ server/tests/      # 测 Bun HTTP 记忆浏览服务
 运行：
 
 ```bash
-python -m pytest tests .teamflow/tests server/tests   # 全部 Python 测试
-python -m pytest .teamflow/tests                      # 只测运行时
-cd server && bun run typecheck                        # server 类型检查
+python -m pytest tests .teamflow/tests   # 全部 Python 测试
+python -m pytest .teamflow/tests         # 只测运行时
+cd server && bun test                    # server 全部测试（Bun，无 Python）
+cd server && bun run typecheck           # server 类型检查
 ```
 
 `.teamflow/tests/` 与 `server/tests/` 都**不会**被安装到业务项目：前者不在 `install.sh` 的 `FILES` 白名单也不在其 `find` 路径中；后者更彻底——`server/` 整体不参与安装，因此其测试根本没有泄漏路径。`tests/test_test_layout.py` 固化这两条约束，并校验搬移后的模块仍以正确深度解析仓库根。
@@ -455,9 +456,10 @@ teamflow debug skill
 │   ├── bin/
 │   └── tests/             # 运行时自身测试（不安装）
 ├── server/                # Bun + TypeScript 只读记忆浏览服务源码（仓库级例外，不安装）
-│   ├── src/ui/            # 按页面拆分的 html/css/js
-│   ├── vite.config.ts     # 仅前端本地迭代
-│   └── tests/             # server 自身测试
+│   ├── src/               # 后端模块（路由、CLI 封装、opencode 代理、静态托管）
+│   ├── shared/            # 前后端共享 API 类型（纯 TypeScript）
+│   ├── web/               # Svelte 前端（Vite 构建到 web/dist/）
+│   └── tests/             # server 自身测试（bun test）
 ├── tests/                 # scripts/ 的测试
 └── scripts/
     ├── bootstrap.sh       # 安装运行时与全局入口
