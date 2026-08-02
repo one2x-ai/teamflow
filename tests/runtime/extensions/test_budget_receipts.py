@@ -9,14 +9,14 @@ observation in the receipt, with null-safe handling for the case where
 
 Mirrors the source-text assertion pattern of
 ``tests/test_memory_context_extension.py``.  All paths are relative to
-the repository root ``ROOT = Path(__file__).resolve().parents[2]``.
+the repository root ``ROOT = Path(__file__).resolve().parents[3]``.
 """
 
 import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 EXTENSION_FILE = (
     ROOT / ".teamflow" / "extensions" / "memory-context" / "index.ts"
 )

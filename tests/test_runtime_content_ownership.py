@@ -351,10 +351,10 @@ class TeamflowDirectoryIsNotNpmProjectTests(unittest.TestCase):
         """Prove the premise: extensions never needed a local npm install.
 
         Every import specifier in ``.teamflow/extensions/**/*.ts`` must
-        resolve through Pi's own installation or relative paths — never
-        through a local ``node_modules``.  If an extension ever adopts a
-        dependency outside this allow-list, this test flags that the
-        no-npm rule needs revisiting.
+        resolve through Pi's own installation, Bun's built-in modules, or
+        relative paths — never through a local ``node_modules``.  If an
+        extension ever adopts a dependency outside this allow-list, this
+        test flags that the no-npm rule needs revisiting.
         """
         import_patterns = (
             re.compile(r'from\s+"([^"]+)"'),
@@ -371,6 +371,9 @@ class TeamflowDirectoryIsNotNpmProjectTests(unittest.TestCase):
                     if (
                         specifier.startswith("@earendil-works/")
                         or specifier == "typebox"
+                        # bun:test is Bun's built-in test module, resolved by
+                        # the runtime, not by npm or a local node_modules.
+                        or specifier == "bun:test"
                         or specifier.startswith("node:")
                         or specifier.startswith(".")
                     ):

@@ -251,7 +251,7 @@ export function deserializeRuleDelta(xml: string): MemoryDelta | null {
 		});
 	}
 
-	const retireRegex = /<retire\s+([^/>]*?)\/>/g;
+	const retireRegex = /<retire\s+([^>]*?)\/>/g;
 	let rm: RegExpExecArray | null;
 	while ((rm = retireRegex.exec(xml)) !== null) {
 		const attrs = parseAttrs(rm[1]);

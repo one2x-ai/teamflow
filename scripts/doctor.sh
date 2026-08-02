@@ -243,6 +243,12 @@ else
   fail "turn-index module .teamflow/extensions/memory-context/turn-index.ts is missing"
 fi
 
+if bun test ./.teamflow/extensions/ >/dev/null 2>&1; then
+  pass "extension behavioral tests pass"
+else
+  fail "extension behavioral tests fail; run 'bun test ./.teamflow/extensions/'"
+fi
+
 if [[ -f ".teamflow/settings.json" ]] && \
    grep -q '"enabled"[[:space:]]*:[[:space:]]*false' .teamflow/settings.json; then
   pass "compaction is disabled via .teamflow/settings.json"

@@ -387,7 +387,6 @@ bun test                   # server 全部测试（纯 Bun，无 Python）
 .teamflow/auth.json        # 凭证
 .teamflow/models-store.json
 .teamflow/.env
-.teamflow/tests/           # 运行时自身测试（追踪但不安装）
 ```
 
 其他 AI harness 的配置在 `.teamflow/.gitignore` 中忽略（`openai.yaml`、`CLAUDE.md`、`.codex/`、`.cursor/`、`.windsurf/`），因此另一个工具可以在该目录下放自己的配置，而不会变成被 `install.sh` 复制到业务项目的受管文件。
@@ -403,24 +402,29 @@ python3 scripts/clean.py              # 执行
 
 ## 测试布局
 
-测试跟随被测代码所在位置，分三层：
+测试跟随被测代码所在位置，分四层：
 
 ```text
-tests/             # 测 scripts/：install、uninstall、wrapper 装配、命名空间与清理守卫
-.teamflow/tests/   # 测可安装运行时：agents、extensions、skills、bin
-server/tests/      # 测 Bun HTTP 记忆浏览服务
+tests/                    # 测 scripts/ 与仓库级契约测试
+tests/runtime/extensions/ # 测运行时扩展集成与接线（Python）
+tests/runtime/agents/     # 测 agent frontmatter 与行为（Python）
+tests/runtime/skills/     # 测 skills 及其脚本（Python）
+tests/runtime/bin/        # 测 bin 适配器与命令（Python）
+.teamflow/extensions/     # 扩展纯逻辑模块的行为测试（bun test，*.test.ts）
+server/tests/             # 测 Bun HTTP 记忆浏览服务
 ```
 
 运行：
 
 ```bash
-python -m pytest tests .teamflow/tests   # 全部 Python 测试
-python -m pytest .teamflow/tests         # 只测运行时
-cd server && bun test                    # server 全部测试（Bun，无 Python）
-cd server && bun run typecheck           # server 类型检查
+python -m pytest tests                   # 全部 Python 测试（含 tests/runtime/）
+python -m pytest tests/runtime           # 只测运行时
+bun test ./.teamflow/extensions/          # 扩展纯逻辑测试（Bun）
+cd server && bun test                     # server 全部测试（Bun，无 Python）
+cd server && bun run typecheck            # server 类型检查
 ```
 
-`.teamflow/tests/` 与 `server/tests/` 都**不会**被安装到业务项目：前者不在 `install.sh` 的 `FILES` 白名单也不在其 `find` 路径中；后者更彻底——`server/` 整体不参与安装，因此其测试根本没有泄漏路径。`tests/test_test_layout.py` 固化这两条约束，并校验搬移后的模块仍以正确深度解析仓库根。
+`tests/runtime/` 与 `server/tests/` 都**不会**被安装到业务项目：前者位于仓库级 `tests/` 目录，而 `install.sh` 的 `FILES` 白名单只列举 `.teamflow/` 下的产品文件；扩展的 `.test.ts` 文件同样不在 `FILES` 数组中。`server/` 整体不参与安装，因此其测试根本没有泄漏路径。`tests/test_test_layout.py` 固化这些约束，并校验搬移后的模块仍以正确深度解析仓库根。四层划分——`tests/`（scripts + 契约）、`tests/runtime/`（运行时按主题分组）、`.teamflow/extensions/*.test.ts`（bun）、`server/tests/`——也由该文件锁定。
 
 ## 维护与诊断
 
@@ -454,8 +458,7 @@ teamflow debug skill
 │   ├── AGENTS.md
 │   ├── agents/
 │   ├── skills/
-│   ├── bin/
-│   └── tests/             # 运行时自身测试（不安装）
+│   └── bin/
 ├── server/                # Bun + TypeScript 只读记忆浏览服务源码（仓库级例外，不安装）
 │   ├── src/               # 后端模块（路由、CLI 封装、opencode 代理、静态托管）
 │   ├── shared/            # 前后端共享 API 类型（纯 TypeScript）

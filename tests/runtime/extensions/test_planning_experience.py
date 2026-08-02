@@ -30,7 +30,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 WRAPPER = ROOT / ".teamflow" / "bin" / "teamflow"
 PHASE_STATE_FILE = (
     ROOT / ".teamflow" / "skills" / "plan-change" / "scripts"

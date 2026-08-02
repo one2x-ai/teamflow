@@ -1,17 +1,21 @@
-"""Requirement tests for the three-tier test layout.
+"""Requirement tests for the repository test layout.
 
 Tests live next to the code they exercise:
 
-  tests/               scripts/ behavior: install, uninstall, wrapper
-                       assembly, namespace and cleanup guards
-  .teamflow/tests/     the installable runtime: agents, extensions, skills,
-                       bin/ — everything under .teamflow/
-  server/tests/        the Bun HTTP memory server
+  tests/                      scripts/ behavior (install, uninstall, wrapper
+                              assembly, namespace and cleanup guards) AND
+                              contract/meta tests (this file)
+  tests/runtime/              the installable runtime: agents, extensions,
+                              skills, bin/ — Python tests grouped by subject
+                              in subdirectories
+  .teamflow/extensions/       extension pure-logic modules — behavioral
+                              bun tests (*.test.ts), not Python
+  server/tests/               the Bun HTTP memory server
 
-Neither .teamflow/tests/ nor server/tests/ may reach a target project:
-.teamflow/tests/ is outside the installer's FILES allowlist and outside the
-directories it walks, and server/ is not installed at all — the memory
-browser is a single global tool, so a copy per project never exists.
+Neither tests/runtime/ nor server/tests/ may reach a target project: the
+installer ships only product .ts files from .teamflow/extensions/ (never
+.test.ts), and server/ is not installed at all — the memory browser is a
+single global tool, so a copy per project never exists.
 """
 
 import os
@@ -23,7 +27,8 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 OUTER_TESTS = ROOT / "tests"
-RUNTIME_TESTS = ROOT / ".teamflow" / "tests"
+RUNTIME_TESTS = ROOT / "tests" / "runtime"
+EXTENSION_TESTS = ROOT / ".teamflow" / "extensions"
 SERVER_TESTS = ROOT / "server" / "tests"
 INSTALL = ROOT / "scripts" / "install.sh"
 
@@ -33,7 +38,7 @@ def read(path: Path) -> str:
 
 
 class TestTierLayoutTests(unittest.TestCase):
-    """Each tier exists and holds Python test modules."""
+    """Each tier exists and holds test modules."""
 
     def test_all_three_tiers_exist(self):
         for tier in (OUTER_TESTS, RUNTIME_TESTS, SERVER_TESTS):
@@ -45,7 +50,12 @@ class TestTierLayoutTests(unittest.TestCase):
             with self.subTest(tier=tier.relative_to(ROOT)):
                 # server/tests/ migrated from pytest to bun test in Phase C.1:
                 # test modules are now *.test.ts, not test_*.py.
-                modules = sorted(tier.glob("test_*.py"))
+                # tests/runtime/ groups tests in subject subdirectories, so
+                # rglob is needed to find test_*.py below the top level.
+                if tier == RUNTIME_TESTS:
+                    modules = sorted(tier.rglob("test_*.py"))
+                else:
+                    modules = sorted(tier.glob("test_*.py"))
                 if tier == SERVER_TESTS:
                     modules.extend(sorted(tier.glob("*.test.ts")))
                 self.assertTrue(
@@ -54,8 +64,14 @@ class TestTierLayoutTests(unittest.TestCase):
 
     def test_moved_modules_resolve_repository_root(self):
         """A relocated module must still compute ROOT as the repo root."""
-        for tier, depth in ((RUNTIME_TESTS, 2), (SERVER_TESTS, 2)):
-            for path in sorted(tier.glob("test_*.py")):
+        # tests/runtime/<subject>/test_foo.py is three levels deep, so it
+        # needs parents[3]; server/tests/*.test.ts stays at parents[2].
+        for tier, depth in ((RUNTIME_TESTS, 3), (SERVER_TESTS, 2)):
+            if tier == RUNTIME_TESTS:
+                paths = sorted(tier.rglob("test_*.py"))
+            else:
+                paths = sorted(tier.glob("test_*.py"))
+            for path in paths:
                 text = read(path)
                 if "Path(__file__).resolve().parents" not in text:
                     continue
@@ -63,9 +79,43 @@ class TestTierLayoutTests(unittest.TestCase):
                     self.assertIn(
                         f"parents[{depth}]",
                         text,
-                        f"{path.name} sits one level deeper, so ROOT needs "
-                        f"parents[{depth}]",
+                        f"{path.name} sits at parents[{depth}] depth, "
+                        f"so ROOT needs parents[{depth}]",
                     )
+
+    def test_old_runtime_tests_dir_removed(self):
+        """The old .teamflow/tests/ directory must no longer exist."""
+        self.assertFalse(
+            (ROOT / ".teamflow" / "tests").exists(),
+            ".teamflow/tests/ was superseded by tests/runtime/",
+        )
+
+    def test_runtime_tests_grouped_by_subject(self):
+        """tests/runtime/ must have subject subdirectories with tests."""
+        for subject in ("extensions", "agents", "skills", "bin"):
+            subdir = RUNTIME_TESTS / subject
+            with self.subTest(subject=subject):
+                self.assertTrue(
+                    subdir.is_dir(),
+                    f"{subdir} must exist",
+                )
+                modules = sorted(subdir.glob("test_*.py"))
+                self.assertTrue(
+                    modules,
+                    f"{subdir} must contain at least one test_*.py",
+                )
+
+    def test_extension_bun_tests_exist(self):
+        """Extension pure-logic modules have behavioral bun tests."""
+        self.assertTrue(
+            EXTENSION_TESTS.is_dir(),
+            f"{EXTENSION_TESTS} must exist",
+        )
+        bun_tests = list(EXTENSION_TESTS.rglob("*.test.ts"))
+        self.assertTrue(
+            bun_tests,
+            f"{EXTENSION_TESTS} must contain at least one .test.ts",
+        )
 
 
 class OuterTierScopeTests(unittest.TestCase):
@@ -76,7 +126,7 @@ class OuterTierScopeTests(unittest.TestCase):
     EXEMPT = {"test_test_layout.py"}
 
     def test_outer_tier_does_not_test_extensions_directly(self):
-        """Extension module contracts belong to .teamflow/tests/."""
+        """Extension module contracts belong to tests/runtime/extensions/."""
         for path in sorted(OUTER_TESTS.glob("test_*.py")):
             if path.name in self.EXEMPT:
                 continue
@@ -86,7 +136,7 @@ class OuterTierScopeTests(unittest.TestCase):
                     "extensions/memory-context/turn-block.ts",
                     text,
                     f"{path.name} inspects an extension module; move it to "
-                    ".teamflow/tests/",
+                    "tests/runtime/extensions/",
                 )
 
 
@@ -147,6 +197,24 @@ class InstallerExcludesTestsTests(unittest.TestCase):
         ]
         self.assertEqual(
             offenders, [], f"installer must not ship test modules: {offenders}"
+        )
+
+    def test_extension_bun_tests_not_in_files_array(self):
+        """Extension .test.ts files must not appear in the installer manifest.
+
+        The FILES array in install.sh lists specific product .ts files;
+        behavioral .test.ts test files must never ship to a target project.
+        """
+        text = read(INSTALL)
+        offenders = [
+            line.strip()
+            for line in text.splitlines()
+            if ".test.ts" in line
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            f"install.sh must not list .test.ts files: {offenders}",
         )
 
 

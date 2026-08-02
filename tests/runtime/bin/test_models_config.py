@@ -6,7 +6,7 @@ reads ``.teamflow/models.json`` (NOT ``.teamflow/config.json``). These tests pin
 the Pi-native provider registry that the installer must ship.
 
 All paths are relative to the repository root
-``ROOT = Path(__file__).resolve().parents[2]``.
+``ROOT = Path(__file__).resolve().parents[3]``.
 """
 
 import json
@@ -19,7 +19,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 MODELS_PATH = ROOT / ".teamflow" / "models.json"
 AGENTS_DIR = ROOT / ".teamflow" / "agents"
 INIT_SCRIPT = ROOT / "scripts" / "install.sh"

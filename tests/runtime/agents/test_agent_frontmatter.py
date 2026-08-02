@@ -9,7 +9,7 @@ These tests pin the Pi-native agent identity migration:
   - both tools share the same depth-0 planner gate.
 
 All paths are relative to the repository root
-``ROOT = Path(__file__).resolve().parents[2]``.
+``ROOT = Path(__file__).resolve().parents[3]``.
 """
 
 import json
@@ -22,7 +22,7 @@ import unittest
 from pathlib import Path
 
 
-ROOT = Path(__file__).resolve().parents[2]
+ROOT = Path(__file__).resolve().parents[3]
 MODELS_PATH = ROOT / ".teamflow" / "models.json"
 PI_RUNTIME = ROOT / ".teamflow" / "bin" / "pi-runtime"
 WRAPPER = ROOT / ".teamflow" / "bin" / "teamflow"
