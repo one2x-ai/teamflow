@@ -147,7 +147,8 @@ teamflow run --agent planner "分析需求"     # 按 agents/<role>.md frontmatt
 teamflow command "列出当前分支"             # command 角色的快捷入口
 teamflow debug agent [名称]                 # 查看项目 .teamflow/agents/ 中的 Agent 元数据
 teamflow debug skill                        # 列出项目 .teamflow/skills/ 中已安装的 Skill
-teamflow session list --format json         # 仅输出会话元数据（id/model/provider/时间/message_count）
+teamflow session list --format json         # 仅输出会话元数据（id/model/provider/created/updated/message_count），默认上限 10 条
+teamflow probe                               # 探测最近活跃的运行（state/activity/fp）；退出码 0=alive、1=exited、2=unknown
 ```
 
 角色身份由 `agents/<role>.md` 的 Markdown frontmatter 唯一确定：`model`（`<provider>/<model>`）映射到 provider 与模型，文件正文即系统提示；`test-runner` 通过 frontmatter 的 `tools` 排除 edit 保持只读。`pi-runtime` 传递 `--no-context-files`，Pi 不再自动拼接 AGENTS.md；改为由 `memory-context` 扩展在 `before_agent_start` 时读取项目根目录 `AGENTS.md` 并以可见 XML 消息注入（见 Phase C）。声明 `needs_project_rules: false` 的角色（如 `test-runner`、`command`）跳过 AGENTS.md 注入以节省 token。会话目录默认读取 `TEAMFLOW_PI_SESSION_DIR`，未设置时回退到 `$PI_CODING_AGENT_DIR/sessions`。
@@ -204,7 +205,7 @@ Pi 以流式方式消费模型响应。明确的 provider timeout、认证失败
 
 记忆 Agent 默认同样无限等待 provider。只有显式设置正整数 `TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS` 才启用本地 wall-time；零、负数和非整数会被拒绝。若显式 timeout 或 provider 错误发生在 extraction 之后，使用 `teamflow memory-capture --receipt <file> --resume-formatting <run-id>`，不重跑已完成阶段；启用 timeout 时仍会终止整个子进程组，避免后台孤儿继续执行 apply。
 
-外层协调只观察元数据：用 `teamflow phase status --run-id <id>` 读取阶段收据，用 `teamflow session list --format json` 读取会话概要，并检查 `.teamflow/runs/` 下约定产物是否存在。它不读取会话文件、prompt、reasoning、response、原始错误或凭证，也不因终端静默自行终止内层运行。
+外层协调只观察元数据：默认先用 `teamflow probe` 作最轻的首轮探测——自动发现最近活跃的运行，输出一行 `state/activity/fp` 并以退出码区分 alive/exited/unknown；只有 fp 变化或 state 非 alive 时才升级到 `teamflow phase status --run-id <id>` 读取阶段收据，用 `teamflow session list --format json` 读取会话概要（上限 10 条），并检查 `.teamflow/runs/` 下约定产物是否存在。它不读取会话文件、prompt、reasoning、response、原始错误或凭证，也不因终端静默自行终止内层运行。
 
 外层 loop 的这套监听契约固化为可安装 Skill `.teamflow/skills/observe-inner-loop/`，并在 `.teamflow/AGENTS.md` 的「Outer loop observation」章节声明。因为外层 loop 不干活，它必须以最低 token 成本准确探测内层执行路径：只测产物存在性与非空、不读产物正文；`RUNNING` + `stale: true` 仅表示观察时间超过 `TEAMFLOW_PHASE_TIMEOUT_SECONDS`，不是失败，`BLOCKED` 是唯一停止信号；轮询间隔至少 30 秒，状态未变化时保持静默、只报告 phase 与 status 的跃迁。
 

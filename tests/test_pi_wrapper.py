@@ -209,13 +209,11 @@ class DebugResourceTests(unittest.TestCase):
 class SessionListTests(unittest.TestCase):
     """``session list --format json`` honors ``TEAMFLOW_PI_SESSION_DIR``."""
 
-    # Assumption encoded here (open question in the handoff): the exact
-    # location/schema of real pi session JSONL is abstracted behind
-    # TEAMFLOW_PI_SESSION_DIR. The fixture format these tests create is one
-    # ``<id>.jsonl`` file per session whose first line is a header record
-    # carrying id/model/provider/created_at/updated_at, followed by one JSON
-    # record per message. The implementation must adapt real pi session files
-    # to the pinned metadata schema when TEAMFLOW_PI_SESSION_DIR points here.
+    # The real pi session schema: one ``<id>.jsonl`` file per session inside
+    # the per-cwd subdirectory of TEAMFLOW_PI_SESSION_DIR, whose first line is
+    # a ``session`` header record carrying id/timestamp, followed by
+    # ``model_change`` and ``message`` records. Listing output is bounded to
+    # the 10 newest files and exposes metadata keys only.
     DISTINCTIVE_BODY = "DISTINCTIVE_PROMPT_BODY_DO_NOT_LEAK_9281"
 
     def _session_env(self, session_dir):
@@ -225,24 +223,32 @@ class SessionListTests(unittest.TestCase):
         return env
 
     def _write_fixture(self, session_dir, session_id="sess-abc", messages=2):
-        session_dir.mkdir(parents=True, exist_ok=True)
+        encoded = "--" + str(ROOT).lstrip("/").replace("/", "-") + "--"
+        cwd_dir = session_dir / encoded
+        cwd_dir.mkdir(parents=True, exist_ok=True)
         lines = [
             json.dumps({
-                "type": "session_header",
+                "type": "session",
                 "id": session_id,
-                "model": "k3",
+                "timestamp": "2026-07-20T10:00:00Z",
+            }),
+            json.dumps({
+                "type": "model_change",
+                "timestamp": "2026-07-20T10:01:00Z",
                 "provider": "kimi",
-                "created_at": "2026-07-20T10:00:00Z",
-                "updated_at": "2026-07-20T10:05:00Z",
-            })
+                "modelId": "k3",
+            }),
         ]
         for i in range(messages):
             lines.append(json.dumps({
                 "type": "message",
-                "role": "user",
-                "content": f"{self.DISTINCTIVE_BODY}-{i}",
+                "timestamp": f"2026-07-20T10:0{2 + i}:00Z",
+                "message": {
+                    "role": "user",
+                    "content": f"{self.DISTINCTIVE_BODY}-{i}",
+                },
             }))
-        path = session_dir / f"{session_id}.jsonl"
+        path = cwd_dir / f"{session_id}.jsonl"
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
         return path
 
@@ -269,11 +275,13 @@ class SessionListTests(unittest.TestCase):
             self.assertIsInstance(data, list)
             self.assertEqual(len(data), 1)
             entry = data[0]
-            for field in ("id", "model", "provider", "created_at", "updated_at", "message_count"):
+            for field in ("id", "model", "provider", "created", "updated", "message_count"):
                 with self.subTest(field=field):
                     self.assertIn(field, entry)
             self.assertEqual(entry["model"], "k3")
             self.assertEqual(entry["provider"], "kimi")
+            self.assertEqual(entry["created"], "2026-07-20T10:00:00Z")
+            self.assertEqual(entry["updated"], "2026-07-20T10:03:00Z")
             self.assertEqual(entry["message_count"], 2)
             # Metadata-only: the raw message body must not leak into the listing.
             self.assertNotIn(self.DISTINCTIVE_BODY, completed.stdout)

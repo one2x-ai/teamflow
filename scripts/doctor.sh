@@ -274,6 +274,20 @@ else
   fail "project skills are not discoverable"
 fi
 
+PROBE_OUT="$(HOME="$DOCTOR_HOME" ./.teamflow/bin/teamflow probe 2>/dev/null || true)"
+if printf '%s\n' "$PROBE_OUT" | grep -qE '^state=(alive|exited|unknown) '; then
+  pass "teamflow probe resolves and emits a valid state line"
+else
+  fail "teamflow probe does not emit a valid state line"
+fi
+
+SESSION_OUT="$(HOME="$DOCTOR_HOME" ./.teamflow/bin/teamflow session list --format json 2>/dev/null || true)"
+if printf '%s\n' "$SESSION_OUT" | python3 -c "import sys, json; json.loads(sys.stdin.read())" 2>/dev/null; then
+  pass "teamflow session list resolves and emits valid JSON"
+else
+  fail "teamflow session list does not emit valid JSON"
+fi
+
 if (( ERRORS > 0 )); then
   printf '\nDoctor found %d problem(s).\n' "$ERRORS" >&2
   exit 1

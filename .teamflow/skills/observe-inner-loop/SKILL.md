@@ -7,33 +7,48 @@ description: Detect a running Teamflow inner loop's execution path from metadata
 
 You are the outer loop. You do not do the work, so observe cheaply: probe first, escalate only when something changed.
 
+## Two-command surface
+
+| Command | Worst-case cost | Bound |
+|---|---|---|
+| `teamflow probe` | One `ps` call + stat of run dirs | One line, always |
+| `teamflow session list --format json` | Reads at most 10 files | At most 10 entries, 6 keys each |
+
+Reading a run's contents from the outer loop is unsupported. A question that needs them is a question the outer loop should not ask.
+
 ## Rung 1 — liveness probe (default, every poll)
 
 ```bash
-python3 .teamflow/skills/observe-inner-loop/scripts/probe.py --run-id <id> [--pid <pid>]
+teamflow probe
 ```
 
-One line out — `state=alive|exited|unknown activity=<Ns> fp=<phase:status:size>` — nothing else. No turn counts, tool names, event dumps, or file bodies. While `state=alive` and `fp` is unchanged from the last poll, report nothing and spend no tokens: this is the steady state of a working run and needs no log parsing. `activity` (seconds since the current phase file was written) grows during a long phase and is not failure evidence.
+One line: `state=alive|exited|unknown activity=<Ns> fp=<phase:status:size>`.
+With no arguments, discovers the newest run under `.teamflow/runs/code/` by directory mtime. Liveness checks the process table for a `pi` process; with concurrent delegations it reports whether any pi is running and cannot attribute a process to a specific run. Exit codes: `0` alive, `1` exited, `2` unknown — usable without parsing. `--run-id <id>` pins a run; `--pid <pid>` overrides process detection.
 
-## Rung 2 — read the phase receipt (only when fp changed or state=exited)
+While `state=alive` and `fp` is unchanged, report nothing and spend no tokens. `activity` grows during a long phase and is not failure evidence.
+
+## Rung 2 — phase receipt (only when fp changed or state=exited)
 
 ```bash
-teamflow phase status --run-id <id>              # current phase receipt
-teamflow phase status --run-id <id> --phase <n>  # a historical phase receipt
+teamflow phase status --run-id <id>
 ```
 
-Costs one small receipt, read only on a transition. `RUNNING` with `stale: true` means observation time exceeded `TEAMFLOW_PHASE_TIMEOUT_SECONDS`; it is not a failure and must not terminate the run. `BLOCKED` is the only real stop signal — read its `block_reason`. `PASS` or `FAIL` ends that phase.
+One small receipt, read only on a transition. `RUNNING` with `stale: true` is not failure. `BLOCKED` is the only stop signal — read its `block_reason`. At a phase boundary, confirm expected artifacts under `.teamflow/runs/` exist and are non-empty; test existence and size, never bodies.
 
-## Rung 3 — artifact existence (only at a phase boundary)
+## Rung 3 — session summary (sparingly)
 
-Confirm expected paths under `.teamflow/runs/` exist and are non-empty (`runs/phases/`, `runs/test-patches/<id>/tests.patch`, `runs/task-receipts/<id>/receipt.json`). Test existence and size; do not read bodies. `teamflow session list --format json` is the costliest rung — use it sparingly, never as the default.
+```bash
+teamflow session list --format json
+```
 
-## Invariants
-
-- Poll at least 30 seconds apart. Never in a tight loop.
-- Report only transitions: phase entered, phase finished, BLOCKED raised. While status and phase are unchanged, report nothing.
-- Terminal silence and elapsed wall time alone are never failure evidence; a provider may be queueing.
+Bounded to the 10 newest files for the current working directory. Each entry: `id`, `model`, `provider`, `created`, `updated`, `message_count`. No message bodies, prompts, or responses. `--limit N` (N at most 10) lowers the count; above 10 is rejected.
 
 ## Isolation
 
-Read-only: never write, edit, or delete. Never read session files, prompts, reasoning, model responses, raw provider errors, configuration, or credentials. Metadata receipts and artifact existence are the entire observation surface.
+Observation is read-only: never write, edit, or delete. Never read session files, prompts, reasoning, model responses, raw errors, or credentials — do not read artifact bodies; test existence and size only.
+
+## Invariants
+
+- Poll at least 30 seconds apart.
+- Report only transitions. While unchanged, stay silent.
+- Terminal silence and elapsed time are never failure evidence.

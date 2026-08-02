@@ -78,6 +78,11 @@ if [[ "${1:-}" == "session" ]]; then
   exec python3 "$RUNTIME_DIR/bin/pi-runtime" session "$@"
 fi
 
+if [[ "${1:-}" == "probe" ]]; then
+  shift
+  exec python3 "$RUNTIME_DIR/skills/observe-inner-loop/scripts/probe.py" "$@"
+fi
+
 if [[ "${1:-}" == "command" ]]; then
   shift
   exec python3 "$RUNTIME_DIR/bin/pi-runtime" run --agent command "$@"

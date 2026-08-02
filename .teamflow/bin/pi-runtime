@@ -22,6 +22,7 @@ AGENTS_DIR = TEAMFLOW_DIR / "agents"
 SKILLS_DIR = TEAMFLOW_DIR / "skills"
 TASK_EXTENSION_PATH = TEAMFLOW_DIR / "extensions" / "teamflow-task" / "index.ts"
 MEMORY_CONTEXT_EXTENSION_PATH = TEAMFLOW_DIR / "extensions" / "memory-context" / "index.ts"
+SESSION_LIMIT_CAP = 10
 
 
 def _fail(message):
@@ -193,37 +194,57 @@ def _session_dir():
     return Path.home() / ".pi" / "sessions"
 
 
+def _cwd_session_dir(parent):
+    cwd = os.getcwd()
+    encoded = "--" + cwd.lstrip("/").replace("/", "-") + "--"
+    return parent / encoded
+
+
 def _parse_session_file(path):
-    records = []
+    session_id = path.stem
+    created = None
+    model = None
+    provider = None
+    updated = None
+    message_count = 0
+    header_found = False
     try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
-            if not line:
-                continue
-            try:
-                record = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if isinstance(record, dict):
-                records.append(record)
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    record = json.loads(line)
+                except (json.JSONDecodeError, ValueError):
+                    continue
+                if not isinstance(record, dict):
+                    continue
+                rtype = record.get("type")
+                ts = record.get("timestamp")
+                if ts:
+                    updated = ts
+                if rtype == "session":
+                    if not header_found:
+                        session_id = record.get("id") or session_id
+                        created = record.get("timestamp") or created
+                        header_found = True
+                if rtype == "model_change":
+                    provider = record.get("provider") or provider
+                    model = record.get("modelId") or model
+                if rtype == "message":
+                    message_count += 1
     except OSError:
         return None
-    if not records:
+    if not header_found:
         return None
-
-    header = next(
-        (r for r in records if r.get("type") == "session_header"), records[0]
-    )
-    messages = [r for r in records if r.get("type") == "message"]
-    if not messages:
-        messages = [r for r in records if r is not header]
     return {
-        "id": header.get("id") or path.stem,
-        "model": header.get("model"),
-        "provider": header.get("provider"),
-        "created_at": header.get("created_at"),
-        "updated_at": header.get("updated_at"),
-        "message_count": len(messages),
+        "id": session_id,
+        "model": model,
+        "provider": provider,
+        "created": created,
+        "updated": updated,
+        "message_count": message_count,
     }
 
 
@@ -233,7 +254,7 @@ def cmd_session(args):
     rest = args[1:]
 
     fmt = "human"
-    limit = None
+    limit = SESSION_LIMIT_CAP
     i = 0
     while i < len(rest):
         token = rest[i]
@@ -250,19 +271,27 @@ def cmd_session(args):
                 limit = int(rest[i])
             except ValueError:
                 return _fail(f"invalid limit: {rest[i]}")
+            if limit < 0:
+                return _fail(f"limit must be non-negative: {limit}")
+            if limit > SESSION_LIMIT_CAP:
+                return _fail(f"limit {limit} exceeds cap {SESSION_LIMIT_CAP}")
         else:
             return _fail(f"unknown option: {token}")
         i += 1
 
     entries = []
-    session_dir = _session_dir()
-    if session_dir.is_dir():
-        for path in sorted(session_dir.glob("*.jsonl")):
+    session_parent = _session_dir()
+    cwd_dir = _cwd_session_dir(session_parent)
+    if cwd_dir.is_dir():
+        files = sorted(
+            cwd_dir.glob("*.jsonl"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for path in files[:limit]:
             entry = _parse_session_file(path)
             if entry is not None:
                 entries.append(entry)
-    if limit is not None:
-        entries = entries[: max(limit, 0)]
 
     if fmt == "json":
         print(json.dumps(entries))
@@ -270,7 +299,7 @@ def cmd_session(args):
         for entry in entries:
             print(
                 "{id}  model={model} provider={provider} "
-                "messages={message_count} updated={updated_at}".format(**entry)
+                "messages={message_count} updated={updated}".format(**entry)
             )
     return 0
 
