@@ -489,7 +489,7 @@ teamflow debug skill
 
 仓库根目录提供多阶段 `Dockerfile`：构建阶段安装 `opencode-ai`、`@earendil-works/pi-coding-agent` 与 `basic-memory`（经 `uv tool install`），运行阶段以非 root 用户 `opencode` 在 `WORKDIR /app`（包含 `.teamflow/` 运行时）下启动 Web UI。
 
-- 启动命令：`node scripts/opencode_health_gateway.js`。容器以无第三方依赖的 Node 健康/认证网关占据公开端口 `0.0.0.0:${PORT:-3000}`，由网关在回环地址上拉起 `opencode web` 并代理全部流量（含 WebSocket 升级）；ELB 健康检查（`ELB-HealthChecker/` UA 访问 `/`）由网关按每次请求在内存中注入 Basic Auth 后转发给上游。
+- 启动命令：`node scripts/opencode_health_gateway.js`。容器以无第三方依赖的 Node 健康网关占据公开端口 `0.0.0.0:${PORT:-3000}`，由网关在回环地址上拉起 `opencode web` 并代理全部流量（含 WebSocket 升级）；健康探针（`kube-probe/` 或 `ELB-HealthChecker/` UA 访问 `GET`/`HEAD /`）由网关直接返回合成的最小化 HTTP 200（`text/plain`，正文 `ok`），既不转发给上游也不注入任何凭证，其余流量照常代理。
 - 容器端口：`3000`，可用环境变量 `PORT` 覆盖（需同步调整 `-p` 映射）。
 - 绑定地址：`0.0.0.0`，供宿主机或反向代理访问。
 - 凭据：模型与运行时密钥一律在 `docker run` 时通过环境变量注入；镜像不含任何凭据或 `.env` 内容，也不要把真实密钥写入命令历史或文档。

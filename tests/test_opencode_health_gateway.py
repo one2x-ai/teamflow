@@ -2,8 +2,10 @@
 
 The gateway (``scripts/opencode_health_gateway.js``) is a dependency-free
 Node HTTP proxy that owns the public ``0.0.0.0:${PORT:-3000}`` listener,
-spawns ``opencode web`` on loopback as a child, injects Basic Auth for
-One2X ELB health checks (``User-Agent: ELB-HealthChecker/...`` on ``/``),
+spawns ``opencode web`` on loopback as a child, serves a **synthetic**
+minimal HTTP 200 (body ``ok``) directly for kube-probe and One2X ELB
+health checks (``User-Agent: kube-probe/...`` or
+``ELB-HealthChecker/...`` on ``GET``/``HEAD`` of the root path ``/``),
 proxies all other traffic normally, streams bodies, forwards upgrades,
 propagates child exit/signals, and fails closed when credentials are
 missing.
@@ -362,15 +364,32 @@ class FailClosedTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# A5 -- ELB health check (UA prefix + root path -> injected Basic Auth)
+# A5 -- Health probes (kube-probe + ELB UA, GET/HEAD root -> synthetic 200)
 # ---------------------------------------------------------------------------
 
 
-class ELBHealthCheckTests(unittest.TestCase):
-    """A5: ELB UA on root path triggers injected Basic Auth header."""
+class HealthProbeTests(unittest.TestCase):
+    """A5: kube-probe / ELB UA on GET or HEAD of '/' returns synthetic 200.
+
+    The gateway must serve a minimal HTTP 200 response **directly** (body
+    ``ok``, ``Content-Type: text/plain; charset=utf-8``) without proxying
+    to the upstream and without constructing or injecting any
+    Authorization header.  Health bypass is limited to ``GET``/``HEAD``
+    on the exact root path ``/``; other methods and paths must fall
+    through to the normal proxy.
+    """
 
     def setUp(self):
         self.source = _require_gateway_source()
+
+    # -- UA detection ----------------------------------------------------
+
+    def test_detects_kube_probe_user_agent_prefix(self):
+        self.assertIn(
+            "kube-probe/",
+            self.source,
+            "must detect User-Agent prefix 'kube-probe/'",
+        )
 
     def test_detects_elb_user_agent_prefix(self):
         self.assertIn(
@@ -379,63 +398,132 @@ class ELBHealthCheckTests(unittest.TestCase):
             "must detect User-Agent prefix 'ELB-HealthChecker/'",
         )
 
+    # -- Method / path scoping -------------------------------------------
+
     def test_health_check_limited_to_root_path(self):
         self.assertTrue(
             re.search(r'''['"]\s*/\s*['"]''', self.source),
             "health check branch must reference root path '/'",
         )
 
-    def test_constructs_authorization_header(self):
-        self.assertTrue(
-            re.search(r'[Aa]uthorization', self.source),
-            "must construct an Authorization header for health checks",
+    def test_health_check_accepts_head_method(self):
+        """HEAD / must also be served synthetically by the health branch."""
+        self.assertIn(
+            "HEAD",
+            self.source,
+            "health bypass must also handle HEAD method on '/'",
         )
 
-    def test_base64_encodes_credentials(self):
+    def test_health_check_examines_request_method(self):
+        """The health detection logic must check the request method."""
         self.assertTrue(
-            re.search(r'base64', self.source, re.IGNORECASE),
-            "must base64-encode credentials in-memory",
+            re.search(r'\.method\b', self.source),
+            "health detection must examine req.method",
         )
 
-    def test_overwrites_inbound_authorization(self):
+    # -- Synthetic response body / status --------------------------------
+
+    def test_synthetic_health_response_writes_200(self):
+        self.assertTrue(
+            re.search(r'writeHead\s*\(\s*200\b', self.source),
+            "health branch must write HTTP 200 status via writeHead",
+        )
+
+    def test_synthetic_health_response_body_is_ok(self):
+        self.assertTrue(
+            re.search(r"['\"]ok['\"]", self.source),
+            "health response body must be the literal string 'ok'",
+        )
+
+    def test_synthetic_health_response_content_type(self):
+        self.assertIn(
+            "text/plain",
+            self.source,
+            "health response must declare Content-Type: text/plain",
+        )
+
+    # -- No proxy / no auth injection for health -------------------------
+
+    def test_synthetic_response_before_proxy_request(self):
+        """The synthetic health response must appear *before* http.request.
+
+        This ensures the health branch writes the response directly rather
+        than falling through to the proxy.
+        """
+        ok_match = re.search(r"['\"]ok['\"]", self.source)
+        self.assertIsNotNone(ok_match, "health response must use 'ok' body")
+        proxy_match = re.search(r'http\.request\s*\(', self.source)
+        self.assertIsNotNone(proxy_match, "must have http.request for proxy")
+        self.assertLess(
+            ok_match.start(),
+            proxy_match.start(),
+            "synthetic health response ('ok') must be written before the "
+            "proxy http.request call so health probes never proxy upstream",
+        )
+
+    def test_health_branch_terminates_response(self):
+        """Health branch must end() the response without calling http.request."""
         self.assertTrue(
             re.search(
-                r'''[\w\[\]'"\.]*[Aa]uthorization[\w\[\]'"\.]*\s*[=:]''',
+                r"end\s*\(\s*['\"]ok['\"]\s*\)",
                 self.source,
             ),
-            "must set/overwrite Authorization header for health checks",
+            "health branch must res.end('ok') to terminate the response "
+            "directly (no proxy, no auth injection)",
+        )
+
+    def test_no_authorization_header_in_source(self):
+        """The gateway must never construct or set any Authorization header."""
+        self.assertNotRegex(
+            self.source,
+            r"[Aa]uthorization",
+            "gateway must not construct, inject, or overwrite any "
+            "Authorization header — health probes are synthetic and "
+            "normal requests pass client headers through untouched",
+        )
+
+    def test_no_base64_encoding_in_source(self):
+        """Health path must not base64-encode credentials (no auth injection)."""
+        self.assertNotRegex(
+            self.source,
+            r'base64',
+            "gateway must not use base64 encoding — no Authorization header "
+            "is constructed for health probes or normal requests",
         )
 
 
 # ---------------------------------------------------------------------------
-# A8 -- Normal request Authorization preserved (not overwritten)
+# A8 -- Normal request passthrough (no auth construction, body piped)
 # ---------------------------------------------------------------------------
 
 
 class NormalAuthPassthroughTests(unittest.TestCase):
-    """A8: Non-health requests preserve the client's Authorization header."""
+    """A8: Gateway never constructs or modifies Authorization headers.
+
+    Health probes are served synthetically with no proxying.  Normal
+    requests pipe the client's own headers (including any client-supplied
+    Authorization) untouched to the upstream via ``req.pipe`` /
+    ``proxyRes.pipe``.
+    """
 
     def setUp(self):
         self.source = _require_gateway_source()
 
-    def test_auth_injection_is_inside_health_branch(self):
-        """The Authorization header injection must be conditional."""
-        elb_pos = self.source.find("ELB-HealthChecker/")
-        self.assertGreater(elb_pos, -1, "ELB detection must exist")
-        auth_sets = list(
-            re.finditer(
-                r'''[\w\[\]'"\.]*[Aa]uthorization[\w\[\]'"\.]*\s*[=:]''',
-                self.source,
-            )
+    def test_no_authorization_header_anywhere(self):
+        """The gateway must never construct or set an Authorization header."""
+        self.assertNotRegex(
+            self.source,
+            r"[Aa]uthorization",
+            "gateway must not construct, inject, or overwrite any "
+            "Authorization header — client headers pass through untouched "
+            "via the headers spread",
         )
+
+    def test_normal_proxy_path_exists(self):
+        """Non-health requests must still reach http.request for proxying."""
         self.assertTrue(
-            auth_sets, "must set Authorization header for health checks"
-        )
-        after_elb = [m for m in auth_sets if m.start() > elb_pos]
-        self.assertTrue(
-            after_elb,
-            "Authorization header injection must be inside the "
-            "health-check branch, not unconditional",
+            re.search(r'http\.request\s*\(', self.source),
+            "normal request path must call http.request to proxy to upstream",
         )
 
 
@@ -642,7 +730,7 @@ class LiveFailClosedTests(unittest.TestCase):
 
 @unittest.skipUnless(shutil.which("docker"), "docker CLI not found")
 class LiveGatewayContractTests(unittest.TestCase):
-    """A5/A6/A7/A9 live: ELB-200, anon-401, auth-200, no auth echo."""
+    """A5/A6/A7/A9 live: kube-probe-200, ELB-200, anon-401, auth-200, isolation."""
 
     def _docker_env(self):
         return _strip_proxy_env()
@@ -685,14 +773,16 @@ class LiveGatewayContractTests(unittest.TestCase):
                 host_port, "could not determine mapped host port"
             )
 
-            # A5: ELB health check -> 200
+            # A5: kube-probe health check -> 200 (synthetic)
+            self._probe_kube_health_200(host_port, env)
+            # A5: ELB health check -> 200 (synthetic)
             self._probe_elb_health_200(host_port, env)
             # A6: anonymous normal request -> 401
             self._probe_anonymous_401(host_port, env)
             # A7: authenticated normal request -> 200
             self._probe_basic_auth_200(host_port, env)
-            # A9: response headers of proxied 200 have no Authorization echo
-            self._probe_no_auth_header_echo(host_port, env)
+            # A9: spoofed-UA isolation -- synthetic body, no auth, no HTML
+            self._probe_spoof_isolation(host_port, env)
         finally:
             if container_id:
                 subprocess.run(
@@ -710,8 +800,42 @@ class LiveGatewayContractTests(unittest.TestCase):
                 stdin=subprocess.DEVNULL,
             )
 
+    def _probe_kube_health_200(self, host_port, env):
+        """A5: kube-probe User-Agent on root path returns HTTP 200."""
+        last_error = None
+        for _ in range(HTTP_RETRIES):
+            try:
+                probe = subprocess.run(
+                    [
+                        "curl", "-sS", "-o", "/dev/null",
+                        "-w", "%{http_code}",
+                        "--max-time", str(HTTP_TIMEOUT),
+                        "--connect-timeout", "10",
+                        "-H", "User-Agent: kube-probe/1.31",
+                        f"http://localhost:{host_port}/",
+                    ],
+                    capture_output=True,
+                    text=True,
+                    timeout=HTTP_TIMEOUT + 15,
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                )
+                code = probe.stdout.strip()
+                if probe.returncode == 0 and code == "200":
+                    return
+                last_error = f"curl exit={probe.returncode} http_code='{code}'"
+            except subprocess.TimeoutExpired:
+                last_error = "curl timed out"
+            except OSError as exc:
+                last_error = f"curl error: {exc}"
+            time.sleep(HTTP_RETRY_DELAY)
+        self.fail(
+            f"kube-probe health check GET / did not return 200 after "
+            f"{HTTP_RETRIES} retries: {last_error}"
+        )
+
     def _probe_elb_health_200(self, host_port, env):
-        """A5: ELB User-Agent on root path returns HTTP 200."""
+        """A5: ELB User-Agent on root path returns HTTP 200 (synthetic)."""
         last_error = None
         for _ in range(HTTP_RETRIES):
             try:
@@ -811,42 +935,66 @@ class LiveGatewayContractTests(unittest.TestCase):
             f"{HTTP_RETRIES} retries: {last_error}"
         )
 
-    def _probe_no_auth_header_echo(self, host_port, env):
-        """A9: response headers of a proxied 200 contain no Authorization."""
-        for _ in range(HTTP_RETRIES):
-            try:
-                probe = subprocess.run(
-                    [
-                        "curl", "-sS", "-D", "-", "-o", "/dev/null",
-                        "--max-time", str(HTTP_TIMEOUT),
-                        "--connect-timeout", "10",
-                        "-u", f"{TEST_USER}:{TEST_PASSWORD}",
-                        f"http://localhost:{host_port}/",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=HTTP_TIMEOUT + 15,
-                    env=env,
-                    stdin=subprocess.DEVNULL,
-                )
-                if probe.returncode == 0:
-                    lines = probe.stdout.splitlines()
-                    if lines and "200" in lines[0]:
-                        self.assertNotIn(
-                            "authorization:",
-                            probe.stdout.lower(),
-                            "response headers must not echo Authorization",
+    def _probe_spoof_isolation(self, host_port, env):
+        """A9: spoofing a health UA returns synthetic 'ok', not authenticated HTML.
+
+        For both ``kube-probe/`` and ``ELB-HealthChecker/`` User-Agents:
+        - Body must be exactly ``ok`` (not OpenCode HTML).
+        - Response must NOT include an ``Authorization`` header.
+        """
+        for ua in ("kube-probe/1.31", "ELB-HealthChecker/2.0"):
+            body_ok = False
+            last_error = None
+            for _ in range(HTTP_RETRIES):
+                try:
+                    probe = subprocess.run(
+                        [
+                            "curl", "-sS",
+                            "-D", "-",
+                            "--max-time", str(HTTP_TIMEOUT),
+                            "--connect-timeout", "10",
+                            "-H", f"User-Agent: {ua}",
+                            f"http://localhost:{host_port}/",
+                        ],
+                        capture_output=True,
+                        text=True,
+                        timeout=HTTP_TIMEOUT + 15,
+                        env=env,
+                        stdin=subprocess.DEVNULL,
+                    )
+                    if probe.returncode == 0:
+                        raw = probe.stdout
+                        # Split headers from body at the first blank line.
+                        parts = re.split(r'\r?\n\r?\n', raw, maxsplit=1)
+                        headers_block = parts[0]
+                        body_block = parts[1] if len(parts) > 1 else ""
+                        # Body must be exactly "ok" (not HTML).
+                        if body_block.strip() == "ok":
+                            body_ok = True
+                            # No Authorization header echoed in response.
+                            self.assertNotIn(
+                                "authorization:",
+                                headers_block.lower(),
+                                f"health response for UA '{ua}' must NOT "
+                                "echo any Authorization header",
+                            )
+                            break
+                        last_error = (
+                            f"body='{body_block.strip()[:80]}' "
+                            "(expected 'ok')"
                         )
-                        return
-            except subprocess.TimeoutExpired:
-                pass
-            except OSError:
-                pass
-            time.sleep(HTTP_RETRY_DELAY)
-        self.skipTest(
-            "No 200 response available to check for auth header echo "
-            "(covered by A7 if that probe also fails)"
-        )
+                    else:
+                        last_error = f"curl exit={probe.returncode}"
+                except subprocess.TimeoutExpired:
+                    last_error = "curl timed out"
+                except OSError as exc:
+                    last_error = f"curl error: {exc}"
+                time.sleep(HTTP_RETRY_DELAY)
+            if not body_ok:
+                self.fail(
+                    f"Spoofed-UA isolation check failed for '{ua}': "
+                    f"expected synthetic body 'ok' but {last_error}"
+                )
 
 
 if __name__ == "__main__":
