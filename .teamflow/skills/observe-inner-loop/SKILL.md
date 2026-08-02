@@ -14,7 +14,7 @@ You are the outer loop. You do not do the work, so observe cheaply: probe first,
 | `teamflow probe` | One `ps` call + stat of run dirs | One line, always |
 | `teamflow session list --format json` | Reads at most 10 files | At most 10 entries, 6 keys each |
 
-Reading a run's contents from the outer loop is unsupported. A question that needs them is a question the outer loop should not ask.
+Reading a run's contents from the outer loop is unsupported.
 
 ## Rung 1 — liveness probe (default, every poll)
 
@@ -23,7 +23,9 @@ teamflow probe
 ```
 
 One line: `state=alive|exited|unknown activity=<Ns> fp=<phase:status:size>`.
-With no arguments, discovers the newest run under `.teamflow/runs/code/` by directory mtime. Liveness checks the process table for a `pi` process; with concurrent delegations it reports whether any pi is running and cannot attribute a process to a specific run. Exit codes: `0` alive, `1` exited, `2` unknown — usable without parsing. `--run-id <id>` pins a run; `--pid <pid>` overrides process detection.
+With no arguments, discovers the newest run under `.teamflow/runs/code/` by directory mtime. Exit codes: `0` alive, `1` exited, `2` unknown. `--run-id <id>` pins a run; `--pid <pid>` overrides process detection.
+
+Liveness means the delegation's process is running, not that the current phase has finished — a PASS/FAIL/BLOCKED receipt still reports `alive` while the process lives. Without `--pid`, `_pi_running()` checks `ps -eo comm=` for any `pi` process; with concurrent delegations it cannot attribute one to a specific run, so a terminal phase may report `alive` while another delegation's pi runs. An unreadable process table yields `unknown` (exit 2) — never guessed from a receipt alone. With a dead process, `fp=...:RUNNING:...` means abandoned/crashed and `fp=...:PASS:...` a clean finish; both report `state=exited` — compare state to fp's status field.
 
 While `state=alive` and `fp` is unchanged, report nothing and spend no tokens. `activity` grows during a long phase and is not failure evidence.
 
@@ -33,7 +35,7 @@ While `state=alive` and `fp` is unchanged, report nothing and spend no tokens. `
 teamflow phase status --run-id <id>
 ```
 
-One small receipt, read only on a transition. `RUNNING` with `stale: true` is not failure. `BLOCKED` is the only stop signal — read its `block_reason`. At a phase boundary, confirm expected artifacts under `.teamflow/runs/` exist and are non-empty; test existence and size, never bodies.
+One small receipt, read only on a transition. `RUNNING` with `stale: true` is not failure. `BLOCKED` is the only stop signal — read its `block_reason`. At a phase boundary, confirm expected artifacts under `.teamflow/runs/` exist and are non-empty — never read bodies.
 
 ## Rung 3 — session summary (sparingly)
 
@@ -45,7 +47,7 @@ Bounded to the 10 newest files for the current working directory. Each entry: `i
 
 ## Isolation
 
-Observation is read-only: never write, edit, or delete. Never read session files, prompts, reasoning, model responses, raw errors, or credentials — do not read artifact bodies; test existence and size only.
+Observation is read-only: never write, edit, or delete. Never read session files, prompts, reasoning, model responses, raw errors, or credentials.
 
 ## Invariants
 

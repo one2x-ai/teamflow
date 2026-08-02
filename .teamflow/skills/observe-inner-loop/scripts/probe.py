@@ -95,9 +95,11 @@ def main():
     size = st.st_size
     activity = max(0, int(time.time() - st.st_mtime))
 
+    # Liveness comes from the process, never from the receipt's status.
+    # A terminal phase (PASS/FAIL/BLOCKED) does not end the delegation.
     if args.pid is not None:
         state = "alive" if _process_alive(args.pid) else "exited"
-    elif status == "RUNNING":
+    else:
         pi = _pi_running()
         if pi is True:
             state = "alive"
@@ -105,10 +107,6 @@ def main():
             state = "exited"
         else:
             state = "unknown"
-    elif status in ("PASS", "FAIL", "BLOCKED"):
-        state = "exited"
-    else:
-        state = "unknown"
 
     print(f"state={state} activity={activity}s fp={phase}:{status}:{size}")
     return EXIT[state]

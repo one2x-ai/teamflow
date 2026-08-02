@@ -9,6 +9,7 @@ poll this single line.
 
 import json
 import os
+import shutil
 import subprocess
 import tempfile
 import time
@@ -166,7 +167,7 @@ class ProbeOutputContractTests(unittest.TestCase):
             home = tmp / "home"
             home.mkdir()
             _make_run_dir(tmp, "r2", "PASS")
-            out, rc = _run_probe(tmp, "r2", home)
+            out, rc = _run_probe(tmp, "r2", home, pi_running="0")
             fields = parse_line(out.strip())
             self.assertEqual(fields["state"], "exited")
             self.assertEqual(rc, 1, "exited must exit 1")
@@ -191,6 +192,30 @@ class ProbeOutputContractTests(unittest.TestCase):
             fields = parse_line(out.strip())
             self.assertEqual(fields["state"], "exited")
             self.assertEqual(rc, 1, "exited must exit 1")
+
+    def test_terminal_status_dead_pid_emits_exited(self):
+        """Terminal status (PASS) + dead --pid → exited."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            home = tmp / "home"
+            home.mkdir()
+            _make_run_dir(tmp, "r5", "PASS")
+            out, rc = _run_probe(tmp, "r5", home, pid=DEAD_PID)
+            fields = parse_line(out.strip())
+            self.assertEqual(fields["state"], "exited")
+            self.assertEqual(rc, 1)
+
+    def test_terminal_status_live_pid_emits_alive(self):
+        """Terminal status (PASS) + live --pid → alive (--pid takes precedence)."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            home = tmp / "home"
+            home.mkdir()
+            _make_run_dir(tmp, "r6", "PASS")
+            out, rc = _run_probe(tmp, "r6", home, pid=os.getpid())
+            fields = parse_line(out.strip())
+            self.assertEqual(fields["state"], "alive")
+            self.assertEqual(rc, 0)
 
 
 class ProbeDiscoveryTests(unittest.TestCase):
@@ -278,8 +303,8 @@ class ProbePidFreeLivenessTests(unittest.TestCase):
             self.assertEqual(fields["state"], "exited")
             self.assertEqual(rc, 1)
 
-    def test_pass_regardless_of_pi_emits_exited(self):
-        """P2: terminal status (PASS) → exited regardless of pi presence."""
+    def test_pass_plus_live_process_emits_alive(self):
+        """Liveness comes from the process: PASS + live pi → alive."""
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
             home = tmp / "home"
@@ -287,8 +312,62 @@ class ProbePidFreeLivenessTests(unittest.TestCase):
             _make_run_dir(tmp, "rp3", "PASS")
             out, rc = _run_probe(tmp, "rp3", home, pi_running="1")
             fields = parse_line(out.strip())
-            self.assertEqual(fields["state"], "exited")
-            self.assertEqual(rc, 1)
+            self.assertEqual(fields["state"], "alive")
+            self.assertEqual(rc, 0)
+
+    def test_fail_plus_live_process_emits_alive(self):
+        """Liveness comes from the process: FAIL + live pi → alive."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            home = tmp / "home"
+            home.mkdir()
+            _make_run_dir(tmp, "rp4", "FAIL")
+            out, rc = _run_probe(tmp, "rp4", home, pi_running="1")
+            fields = parse_line(out.strip())
+            self.assertEqual(fields["state"], "alive")
+            self.assertEqual(rc, 0)
+
+    def test_blocked_plus_live_process_emits_alive(self):
+        """Liveness comes from the process: BLOCKED + live pi → alive."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            home = tmp / "home"
+            home.mkdir()
+            _make_run_dir(tmp, "rp5", "BLOCKED")
+            out, rc = _run_probe(tmp, "rp5", home, pi_running="1")
+            fields = parse_line(out.strip())
+            self.assertEqual(fields["state"], "alive")
+            self.assertEqual(rc, 0)
+
+    def test_process_table_unreadable_emits_unknown(self):
+        """When ps is unavailable, liveness is unknown."""
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            home = tmp / "home"
+            home.mkdir()
+            empty_bin = tmp / "empty-bin"
+            empty_bin.mkdir()
+            _make_run_dir(tmp, "rp6", "PASS")
+            env = clean_env(home)
+            # Do NOT set TEAMFLOW_PROBE_PI_RUNNING; break PATH so ps is absent.
+            # Resolve python3 to an absolute path *before* overriding PATH so
+            # the interpreter still runs while ps is not found.
+            python_bin = shutil.which("python3")
+            env["PATH"] = str(empty_bin)
+            proc = subprocess.run(
+                [python_bin, str(PROBE), "--runs-dir", str(tmp),
+                 "--run-id", "rp6"],
+                cwd=str(ROOT),
+                stdin=subprocess.DEVNULL,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                env=env,
+                timeout=PROBE_TIMEOUT,
+            )
+            out = proc.stdout.decode("utf-8", "replace")
+            fields = parse_line(out.strip())
+            self.assertEqual(fields["state"], "unknown")
+            self.assertEqual(proc.returncode, 2)
 
 
 class ProbeExitCodeTests(unittest.TestCase):
@@ -309,7 +388,7 @@ class ProbeExitCodeTests(unittest.TestCase):
             home = tmp / "home"
             home.mkdir()
             _make_run_dir(tmp, "ec2", "PASS")
-            _, rc = _run_probe(tmp, "ec2", home)
+            _, rc = _run_probe(tmp, "ec2", home, pi_running="0")
             self.assertEqual(rc, 1)
 
     def test_unknown_exits_two(self):
