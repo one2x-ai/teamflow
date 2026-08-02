@@ -36,16 +36,7 @@ If test-first execution is skipped, state the concrete reason in the final repor
 
 ## Handoff contract
 
-Every handoff between agents must contain:
-
-- Goal: one observable outcome.
-- Scope: files or components that may change.
-- Acceptance: verifiable criteria.
-- Constraints: compatibility, security, and non-goals.
-- Evidence: commands and results already obtained.
-- Open questions: unresolved facts that can affect implementation.
-
-Do not hand off vague requests such as "fix it" or "make tests pass".
+A structured handoff is required for every delegation; author it with the `write-handoff` skill. Do not hand off vague requests such as "fix it" or "make tests pass".
 
 ## Engineering rules
 

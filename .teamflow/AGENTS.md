@@ -35,7 +35,7 @@ For command-only requests such as branch creation, committing an already-reviewe
 
 ## Handoff contract
 
-Every handoff must include goal, scope, acceptance criteria, constraints, evidence already obtained, and open questions. Do not hand off vague requests.
+A structured handoff is required for every delegation; author it with the `write-handoff` skill. Do not hand off vague requests.
 
 ## Engineering rules
 
