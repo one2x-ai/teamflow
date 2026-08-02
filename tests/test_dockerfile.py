@@ -26,6 +26,9 @@ DOCKERIGNORE = ROOT / ".dockerignore"
 #: Deterministic default container port shared by static and smoke tests.
 DEFAULT_PORT = 3000
 
+#: Name of the gateway launcher script under scripts/.
+GATEWAY_SCRIPT_NAME = "opencode_health_gateway.js"
+
 #: Docker build timeout (must exceed 120 s).
 BUILD_TIMEOUT = 600
 
@@ -178,73 +181,81 @@ class DockerfileExistsTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AC 2 — Entrypoint/command contract
+# AC 2 — Gateway command contract
 # ---------------------------------------------------------------------------
+#
+# Under the gateway architecture, the Dockerfile CMD launches the gateway
+# launcher (``scripts/opencode_health_gateway.js``) instead of raw
+# ``opencode web``.  The gateway owns the public ``0.0.0.0:PORT`` listener
+# and spawns ``opencode web`` as a child on ``127.0.0.1``.  The contract
+# assertions below verify the new CMD shape without weakening EXPOSE,
+# non-root USER, multi-stage, or secret-guard assertions.
 
 
 class CommandContractTests(unittest.TestCase):
-    """AC 2: ``opencode web`` with safe hostname and PORT-overridable port."""
+    """AC 2: CMD launches the gateway; gateway owns 0.0.0.0:PORT bind."""
 
     def setUp(self):
         self.text = _require_dockerfile_text()
 
-    def test_invokes_opencode_web_not_serve(self):
+    def test_cmd_invokes_gateway_launcher(self):
         cmd = _final_command(self.text)
-        self.assertRegex(cmd, r"\bopencode\b", "command must invoke 'opencode'")
-        self.assertRegex(cmd, r"\bweb\b", "command must use the 'web' subcommand")
-        self.assertNotRegex(
+        self.assertIn(
+            GATEWAY_SCRIPT_NAME,
             cmd,
-            r"\bserve\b",
-            "command must use 'opencode web', not 'opencode serve'",
+            f"CMD must launch the gateway launcher ({GATEWAY_SCRIPT_NAME})",
         )
 
-    def test_binds_to_all_interfaces(self):
+    def test_cmd_invokes_node(self):
         cmd = _final_command(self.text)
         self.assertRegex(
             cmd,
-            r"--hostname[=\s]+0\.0\.0\.0",
-            "command must bind to 0.0.0.0 via --hostname",
+            r"\bnode\b",
+            "CMD must invoke 'node' to run the gateway script",
         )
 
-    def test_no_loopback_bind_in_final_command(self):
+    def test_cmd_does_not_directly_run_opencode_web(self):
+        """The CMD must not directly run ``opencode web`` (gateway owns it)."""
+        cmd = _final_command(self.text)
+        self.assertNotRegex(
+            cmd,
+            r"\bopencode\s+web\b",
+            "CMD must launch the gateway, not raw 'opencode web'",
+        )
+
+    def test_public_listener_is_not_loopback(self):
+        """The gateway (not CMD flags) owns the public 0.0.0.0 bind.
+
+        The CMD itself should not contain a 127.0.0.1 hostname bind.
+        The public listener is managed by the gateway script which binds
+        0.0.0.0.
+        """
         cmd = _final_command(self.text)
         self.assertNotIn(
             "127.0.0.1",
             cmd,
-            "final command must not bind to 127.0.0.1 (unsafe default)",
+            "CMD must not bind to loopback; the gateway manages the public bind",
         )
 
-    def test_port_env_with_default_fallback(self):
-        self.assertRegex(
-            self.text,
-            r"\$\{PORT:\s*-\s*\d+\}",
-            "Dockerfile must reference PORT with a default, e.g. ${PORT:-3000}",
+    def test_port_default_3000_exists(self):
+        """A PORT default of 3000 must exist somewhere in Dockerfile or CMD.
+
+        The gateway reads ``process.env.PORT`` (default 3000).  The Dockerfile
+        may carry ``${PORT:-3000}`` in the CMD for pass-through, or the
+        default is owned by the gateway script itself.
+        """
+        self.assertTrue(
+            "3000" in self.text,
+            "PORT default of 3000 must exist in Dockerfile or CMD",
         )
 
-    def test_expose_matches_default_port(self):
-        m = re.search(r"\$\{PORT:\s*-\s*(\d+)\}", self.text)
-        self.assertIsNotNone(m, "No ${PORT:-<port>} default found in Dockerfile")
-        default_port = int(m.group(1))
-        self.assertGreater(default_port, 0, "default port must be positive")
-        self.assertLessEqual(default_port, 65535, "default port must be <= 65535")
-
+    def test_expose_is_3000(self):
         expose = re.search(r"^\s*EXPOSE\s+(\d+)", self.text, re.MULTILINE)
-        self.assertIsNotNone(expose, "No EXPOSE instruction found in Dockerfile")
-        expose_port = int(expose.group(1))
+        self.assertIsNotNone(expose, "No EXPOSE instruction found")
         self.assertEqual(
-            default_port,
-            expose_port,
-            f"EXPOSE port ({expose_port}) must equal the PORT default "
-            f"({default_port})",
-        )
-
-    def test_default_port_is_well_known_constant(self):
-        m = re.search(r"\$\{PORT:\s*-\s*(\d+)\}", self.text)
-        self.assertIsNotNone(m, "No ${PORT:-<port>} default found in Dockerfile")
-        self.assertEqual(
-            int(m.group(1)),
+            int(expose.group(1)),
             DEFAULT_PORT,
-            f"expected default port {DEFAULT_PORT}, got {m.group(1)}",
+            f"EXPOSE must be {DEFAULT_PORT}",
         )
 
 
@@ -483,158 +494,14 @@ class DockerignoreContractTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AC 7 — Live Docker smoke test (conditional, never silent pass)
+# AC 7 — Live Docker smoke test (SUPERSEDED by gateway contract)
 # ---------------------------------------------------------------------------
-
-
-@unittest.skipUnless(shutil.which("docker"), "docker CLI not found")
-class LiveDockerSmokeTests(unittest.TestCase):
-    """Build the image and verify HTTP 200 on '/'.
-
-    Skips cleanly when Docker is absent or when a registry/network issue
-    prevents the build -- never reports a silent PASS.
-    """
-
-    def _docker_env(self):
-        return _strip_proxy_env()
-
-    def test_build_and_http_200(self):
-        env = self._docker_env()
-        tag = f"teamflow-opencode-web-smoke:{int(time.time())}"
-        container_id = None
-
-        # --- build ---
-        try:
-            build = subprocess.run(
-                [
-                    "docker",
-                    "build",
-                    "-t",
-                    tag,
-                    "-f",
-                    str(DOCKERFILE),
-                    str(ROOT),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=BUILD_TIMEOUT,
-                env=env,
-                stdin=subprocess.DEVNULL,
-            )
-        except subprocess.TimeoutExpired:
-            self.skipTest(
-                f"docker build timed out after {BUILD_TIMEOUT}s "
-                "(registry/network)"
-            )
-        except OSError as exc:
-            self.skipTest(f"docker build failed (network/connection): {exc}")
-
-        if build.returncode != 0:
-            self.skipTest(
-                "docker build returned non-zero exit "
-                f"{build.returncode} -- likely registry/network issue"
-            )
-
-        # --- run + probe ---
-        try:
-            run = subprocess.run(
-                [
-                    "docker",
-                    "run",
-                    "-d",
-                    "--rm",
-                    "-p",
-                    f"0:{DEFAULT_PORT}",
-                    tag,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                env=env,
-                stdin=subprocess.DEVNULL,
-            )
-            if run.returncode != 0:
-                self.skipTest(
-                    f"docker run failed (exit {run.returncode}): "
-                    f"{run.stderr[:200]}"
-                )
-            container_id = run.stdout.strip()
-
-            host_port = self._mapped_port(container_id, env)
-            self.assertIsNotNone(host_port, "could not determine mapped host port")
-
-            self._probe_http_200(host_port, env)
-        finally:
-            if container_id:
-                subprocess.run(
-                    ["docker", "stop", "-t", "5", container_id],
-                    capture_output=True,
-                    timeout=30,
-                    env=env,
-                    stdin=subprocess.DEVNULL,
-                )
-            subprocess.run(
-                ["docker", "rmi", "-f", tag],
-                capture_output=True,
-                timeout=30,
-                env=env,
-                stdin=subprocess.DEVNULL,
-            )
-
-    def _mapped_port(self, container_id, env):
-        port_out = subprocess.run(
-            ["docker", "port", container_id, str(DEFAULT_PORT)],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            env=env,
-            stdin=subprocess.DEVNULL,
-        )
-        for line in port_out.stdout.splitlines():
-            m = re.search(r":(\d+)\s*$", line.strip())
-            if m:
-                return int(m.group(1))
-        return None
-
-    def _probe_http_200(self, host_port, env):
-        last_error = None
-        for _ in range(HTTP_RETRIES):
-            try:
-                probe = subprocess.run(
-                    [
-                        "curl",
-                        "-sS",
-                        "-o",
-                        "/dev/null",
-                        "-w",
-                        "%{http_code}",
-                        "--max-time",
-                        str(HTTP_TIMEOUT),
-                        "--connect-timeout",
-                        "10",
-                        f"http://localhost:{host_port}/",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=HTTP_TIMEOUT + 15,
-                    env=env,
-                    stdin=subprocess.DEVNULL,
-                )
-                if probe.returncode == 0 and probe.stdout.strip() == "200":
-                    return
-                last_error = (
-                    f"curl exit={probe.returncode} "
-                    f"http_code='{probe.stdout.strip()}'"
-                )
-            except subprocess.TimeoutExpired:
-                last_error = "curl timed out"
-            except OSError as exc:
-                last_error = f"curl error: {exc}"
-            time.sleep(HTTP_RETRY_DELAY)
-        self.fail(
-            f"HTTP GET / did not return 200 after {HTTP_RETRIES} retries: "
-            f"{last_error}"
-        )
+#
+# The original LiveDockerSmokeTests asserted an unauthenticated public HTTP
+# 200 on ``GET /``.  Under the gateway architecture, missing credentials
+# means fail-closed (no unsecured public 200).  The full gateway contract
+# — fail-closed, ELB-UA 200, anon 401, auth 200 — is covered by
+# ``tests/test_opencode_health_gateway.py``.
 
 
 # ---------------------------------------------------------------------------

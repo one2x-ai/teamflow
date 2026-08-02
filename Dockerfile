@@ -1,5 +1,6 @@
 # Multi-stage image for the Teamflow OpenCode web runtime.
-# Final command: opencode web --hostname 0.0.0.0 --port ${PORT:-3000}
+# Final command: node scripts/opencode_health_gateway.js
+# (gateway binds 0.0.0.0:${PORT:-3000} and spawns opencode web on loopback)
 
 FROM node:22-slim AS builder
 
@@ -44,4 +45,4 @@ EXPOSE 3000
 
 USER opencode
 
-CMD ["sh", "-c", "opencode web --hostname 0.0.0.0 --port ${PORT:-3000}"]
+CMD ["node", "scripts/opencode_health_gateway.js"]
