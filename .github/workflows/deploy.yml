@@ -1,0 +1,192 @@
+# One2X Playground 应用部署工作流（通用模板，无需修改）
+#
+# 用法：复制到应用仓库的 .github/workflows/deploy.yml，推送到 main 即自动部署。
+# 自动使用仓库名作为应用名 / ECR 仓库名，一般无需改动任何字段。
+
+name: Deploy to One2X Playground
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+env:
+  ECR_REPOSITORY: ${{ github.event.repository.name }}
+  ECR_REGISTRY: 851725565622.dkr.ecr.us-west-2.amazonaws.com
+  GITOPS_REPO: one2x-ai/one2x-playground
+  ENVIRONMENT: playground
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v6
+        with:
+          role-to-assume: arn:aws:iam::851725565622:role/github-actions-one2x-playground
+          aws-region: us-west-2
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Amazon ECR
+        uses: aws-actions/amazon-ecr-login@v2
+
+      - name: Create ECR repository if not exists
+        run: |
+          if ! aws ecr describe-repositories --repository-names ${{ env.ECR_REPOSITORY }} --region us-west-2 2>/dev/null; then
+            echo "ECR 仓库不存在，开始创建..."
+            aws ecr create-repository \
+              --repository-name ${{ env.ECR_REPOSITORY }} \
+              --region us-west-2 \
+              --image-scanning-configuration scanOnPush=true \
+              --encryption-configuration encryptionType=AES256 \
+              --tags \
+                Key=ManagedBy,Value=GitHubActions \
+                Key=Environment,Value=${{ env.ENVIRONMENT }} \
+                Key=Repository,Value=${{ github.repository }}
+            aws ecr put-lifecycle-policy \
+              --repository-name ${{ env.ECR_REPOSITORY }} \
+              --region us-west-2 \
+              --lifecycle-policy-text '{
+                "rules": [
+                  {
+                    "rulePriority": 1,
+                    "description": "Keep last 50 production images",
+                    "selection": {
+                      "tagStatus": "tagged",
+                      "tagPrefixList": ["prd-", "prod-", "v"],
+                      "countType": "imageCountMoreThan",
+                      "countNumber": 50
+                    },
+                    "action": {"type": "expire"}
+                  },
+                  {
+                    "rulePriority": 2,
+                    "description": "Keep last 30 images with sha- prefix",
+                    "selection": {
+                      "tagStatus": "tagged",
+                      "tagPrefixList": ["sha-"],
+                      "countType": "imageCountMoreThan",
+                      "countNumber": 30
+                    },
+                    "action": {"type": "expire"}
+                  },
+                  {
+                    "rulePriority": 3,
+                    "description": "Remove untagged images after 7 days",
+                    "selection": {
+                      "tagStatus": "untagged",
+                      "countType": "sinceImagePushed",
+                      "countUnit": "days",
+                      "countNumber": 7
+                    },
+                    "action": {"type": "expire"}
+                  }
+                ]
+              }'
+            echo "ECR 仓库创建成功: ${{ env.ECR_REPOSITORY }}"
+          else
+            echo "ECR 仓库已存在: ${{ env.ECR_REPOSITORY }}"
+          fi
+
+      - name: Set image tag
+        id: set-tag
+        env:
+          HEAD_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: |
+          TAG="sha-$(echo ${{ github.sha }} | cut -c1-7)"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "full_sha=${{ github.sha }}" >> $GITHUB_OUTPUT
+
+          # 业务变更标题：取首行；若为 Merge pull request #N，改拉取 PR title（信息量更高）
+          if [ -n "${HEAD_COMMIT_MESSAGE:-}" ]; then
+            TITLE="$(printf '%s' "$HEAD_COMMIT_MESSAGE" | head -n1)"
+          else
+            TITLE="$(git log -1 --pretty=%s 2>/dev/null || true)"
+          fi
+          TITLE="$(printf '%s' "$TITLE" | tr '\n\r' '  ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+
+          if printf '%s' "$TITLE" | grep -qE '^Merge pull request #[0-9]+'; then
+            PR_NUM="$(printf '%s' "$TITLE" | sed -nE 's/^Merge pull request #([0-9]+).*/\1/p')"
+            if [ -n "$PR_NUM" ]; then
+              PR_TITLE="$(curl -fsSL \
+                -H "Accept: application/vnd.github+json" \
+                -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+                -H "X-GitHub-Api-Version: 2022-11-28" \
+                "https://api.github.com/repos/${GITHUB_REPOSITORY}/pulls/${PR_NUM}" \
+                | jq -r '.title // empty' 2>/dev/null || true)"
+              if [ -n "${PR_TITLE:-}" ] && [ "$PR_TITLE" != "null" ]; then
+                echo "Resolved merge commit to PR #${PR_NUM} title: ${PR_TITLE}"
+                TITLE="$PR_TITLE"
+              fi
+            fi
+          fi
+
+          TITLE="$(printf '%s' "$TITLE" | tr '\n\r' '  ' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')"
+          {
+            echo "commit_title<<EOF"
+            echo "$TITLE"
+            echo "EOF"
+          } >> $GITHUB_OUTPUT
+
+      - name: Build and push Docker image with cache
+        id: build
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:${{ steps.set-tag.outputs.tag }}
+            ${{ env.ECR_REGISTRY }}/${{ env.ECR_REPOSITORY }}:latest
+          cache-from: |
+            type=gha,scope=${{ github.ref_name }}
+            type=gha,scope=main
+          cache-to: type=gha,mode=max,scope=${{ github.ref_name }}
+          provenance: false
+          sbom: false
+
+      - name: Trigger GitOps deployment
+        env:
+          COMMIT_TITLE: ${{ steps.set-tag.outputs.commit_title }}
+        run: |
+          # commit_title 为可选字段；GitOps 侧缺失时回退旧 chore commit 文案
+          curl -X POST \
+            -H "Accept: application/vnd.github+json" \
+            -H "Authorization: Bearer ${{ secrets.ONE2X_GITOPS_PAT }}" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ env.GITOPS_REPO }}/dispatches" \
+            -d "$(jq -n \
+              --arg service "${{ env.ECR_REPOSITORY }}" \
+              --arg environment "${{ env.ENVIRONMENT }}" \
+              --arg image_tag "${{ steps.set-tag.outputs.tag }}" \
+              --arg full_sha "${{ github.sha }}" \
+              --arg commit_title "${COMMIT_TITLE}" \
+              '{
+                event_type: "update-image",
+                client_payload: {
+                  service: $service,
+                  environment: $environment,
+                  image_tag: $image_tag,
+                  full_sha: $full_sha,
+                  commit_title: $commit_title
+                }
+              }')"
+
+      - name: Deployment summary
+        run: |
+          echo "## Deployment Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Service**: ${{ env.ECR_REPOSITORY }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Image Tag**: ${{ steps.set-tag.outputs.tag }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Environment**: ${{ env.ENVIRONMENT }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Commit**: ${{ github.sha }}" >> $GITHUB_STEP_SUMMARY

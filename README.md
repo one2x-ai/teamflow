@@ -484,3 +484,24 @@ teamflow debug skill
 4. Agent 不得自行推送、强制重置或清理用户工作区。
 5. 调整模型、权限、交接协议或安装链路时，同步 README 和 `AGENTS.md`。
 6. 跨项目记忆保留来源且使用前重新验证，不能替代当前仓库事实。
+
+## 容器运行（Docker）
+
+仓库根目录提供多阶段 `Dockerfile`：构建阶段安装 `opencode-ai`、`@earendil-works/pi-coding-agent` 与 `basic-memory`（经 `uv tool install`），运行阶段以非 root 用户 `opencode` 在 `WORKDIR /app`（包含 `.teamflow/` 运行时）下启动 Web UI。
+
+- 启动命令：`node scripts/opencode_health_gateway.js`。容器以无第三方依赖的 Node 健康网关占据公开端口 `0.0.0.0:${PORT:-3000}`，由网关在回环地址上拉起 `opencode web` 并代理全部流量（含 WebSocket 升级）；健康探针（`kube-probe/` 或 `ELB-HealthChecker/` UA 访问 `GET`/`HEAD /`）由网关直接返回合成的最小化 HTTP 200（`text/plain`，正文 `ok`），既不转发给上游也不注入任何凭证，其余流量照常代理。
+- 容器端口：`3000`，可用环境变量 `PORT` 覆盖（需同步调整 `-p` 映射）。
+- 绑定地址：`0.0.0.0`，供宿主机或反向代理访问。
+- 凭据：模型与运行时密钥一律在 `docker run` 时通过环境变量注入；镜像不含任何凭据或 `.env` 内容，也不要把真实密钥写入命令历史或文档。
+- 登录凭证：必须同时指定 `OPENCODE_SERVER_USERNAME` 和 `OPENCODE_SERVER_PASSWORD` 两个变量，否则 OpenCode 每次启动随机生成不可预测的凭证，无法稳定登录。
+
+```bash
+docker build -t teamflow-opencode-web .
+docker run -p 3000:3000 teamflow-opencode-web
+# 自定义端口：
+docker run -e PORT=8080 -p 8080:8080 teamflow-opencode-web
+# 注入登录凭证（按变量名转发，密钥不进入命令历史）：
+docker run -e OPENCODE_SERVER_USERNAME=$OPENCODE_SERVER_USERNAME -e OPENCODE_SERVER_PASSWORD=$OPENCODE_SERVER_PASSWORD -p 3000:3000 teamflow-opencode-web
+# 推荐：用 --env-file 避免密钥进入 shell 历史
+# docker run --env-file .env -p 3000:3000 teamflow-opencode-web
+```
