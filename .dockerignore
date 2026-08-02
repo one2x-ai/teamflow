@@ -1,0 +1,16 @@
+# Secrets and credentials — never enter the build context.
+.env
+.teamflow/auth.json
+.teamflow/models-store.json
+
+# Runtime/session state — regenerated at runtime.
+.teamflow/runs
+.teamflow/sessions
+
+# VCS metadata.
+.git
+
+# Local build artifacts — rebuilt inside the image when needed.
+node_modules
+server/dist
+server/web/dist
