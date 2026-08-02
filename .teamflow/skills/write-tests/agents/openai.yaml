@@ -1,4 +1,0 @@
-interface:
-  display_name: "Write Tests"
-  short_description: "Create requirement-first tests before implementation"
-  default_prompt: "Use $write-tests to encode this change as failing tests first."

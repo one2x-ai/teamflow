@@ -1,4 +1,0 @@
-interface:
-  display_name: "Extract Memory"
-  short_description: "Compress, extract, and structure verified memory candidates"
-  default_prompt: "Transform verified evidence into auditable atomic memory candidates without writing Basic Memory."

@@ -13,7 +13,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 MONITOR_SKILL = ROOT / "skills/outer-loop-monitor"
 MONITOR_SCRIPT = MONITOR_SKILL / "scripts/monitor_inner_loop.py"
-INIT_PROJECT = ROOT / "scripts/init-project.sh"
+INIT_PROJECT = ROOT / "scripts/install.sh"
 TEAMFLOW_CLI = ROOT / ".teamflow" / "bin" / "teamflow"
 
 
@@ -37,7 +37,7 @@ class OuterLoopMonitorRemovedTests(unittest.TestCase):
         self.assertNotIn("monitor_inner_loop", cli)
 
     def test_no_script_reaches_session_sqlite(self):
-        for script in ("init-project.sh", "bootstrap.sh", "doctor.sh", "setup-memory.sh"):
+        for script in ("install.sh", "bootstrap.sh", "doctor.sh", "setup.sh"):
             source = read(ROOT / "scripts" / script)
             with self.subTest(script=script):
                 self.assertNotIn("opencode.db", source)

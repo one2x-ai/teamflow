@@ -90,12 +90,12 @@ if command -v basic-memory >/dev/null 2>&1; then
        });'; then
     pass "local Basic Memory project $MEMORY_PROJECT_NAME is ready"
   else
-    fail "local Basic Memory is not initialized; run ./scripts/setup-memory.sh"
+    fail "local Basic Memory is not initialized; run ./scripts/setup.sh"
   fi
   if [[ -d "$BASIC_MEMORY_HOME" && -f "$BASIC_MEMORY_CONFIG_DIR/config.json" ]]; then
     pass "Basic Memory shared store is under $MEMORY_ROOT"
   else
-    fail "shared Basic Memory paths are missing; run ./scripts/setup-memory.sh"
+    fail "shared Basic Memory paths are missing; run ./scripts/setup.sh"
   fi
 else
   fail "basic-memory is not installed; run ./scripts/bootstrap.sh"
@@ -173,6 +173,20 @@ for runtime_command in teamflow memory memory-capture test-patch server; do
   fi
 done
 
+# Verify the built web front end exists (built by bootstrap.sh/install.sh).
+if [[ -d "$ROOT_DIR/server/web/dist" ]]; then
+  pass "web front-end build output exists"
+else
+  fail "server/web/dist is missing; run 'cd server && bun run build' or ./scripts/bootstrap.sh"
+fi
+
+# Phase C.1 collapsed server/ into one Bun context: exactly one package.json.
+if [ "$(find "$ROOT_DIR/server" -name package.json -not -path '*/node_modules/*' | wc -l)" -eq 1 ]; then
+  pass "server has a single package.json"
+else
+  fail "server should have exactly one package.json"
+fi
+
 for experiment_command in memory-experiment memory-compare; do
   if [[ -x ".teamflow/experiments/bin/$experiment_command" ]]; then
     pass "experimental command $experiment_command is isolated from the public bin"
@@ -187,7 +201,56 @@ else
   fail "task role-launcher extension .teamflow/extensions/teamflow-task/index.ts is missing"
 fi
 
-for agent in planner command coder test-writer test-runner emotional-salience-sensor memory-compressor memory-extractor memory-formatter; do
+if [[ -f ".teamflow/extensions/memory-context/index.ts" ]]; then
+  pass "memory-context observation extension is installed"
+else
+  fail "memory-context observation extension .teamflow/extensions/memory-context/index.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/memory-context/turn-block.ts" ]]; then
+  pass "cold-memory turn-block module is installed"
+else
+  fail "cold-memory turn-block module .teamflow/extensions/memory-context/turn-block.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/memory-context/cold-memory-store.ts" ]]; then
+  pass "cold-memory-store interface module is installed"
+else
+  fail "cold-memory-store interface module .teamflow/extensions/memory-context/cold-memory-store.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/memory-context/file-cold-store.ts" ]]; then
+  pass "cold-memory file-cold-store module is installed"
+else
+  fail "cold-memory file-cold-store module .teamflow/extensions/memory-context/file-cold-store.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/memory-context/rule-cache.ts" ]]; then
+  pass "rule-cache module is installed"
+else
+  fail "rule-cache module .teamflow/extensions/memory-context/rule-cache.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/memory-context/rule-cache-reducer.ts" ]]; then
+  pass "rule-cache-reducer module is installed"
+else
+  fail "rule-cache-reducer module .teamflow/extensions/memory-context/rule-cache-reducer.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/memory-context/turn-index.ts" ]]; then
+  pass "turn-index module is installed"
+else
+  fail "turn-index module .teamflow/extensions/memory-context/turn-index.ts is missing"
+fi
+
+if [[ -f ".teamflow/settings.json" ]] && \
+   grep -q '"enabled"[[:space:]]*:[[:space:]]*false' .teamflow/settings.json; then
+  pass "compaction is disabled via .teamflow/settings.json"
+else
+  fail ".teamflow/settings.json with compaction.enabled=false is missing"
+fi
+
+for agent in planner command coder test-writer test-runner supervisor emotional-salience-sensor memory-compressor memory-extractor memory-formatter memory-indexer; do
   if HOME="$DOCTOR_HOME" ./.teamflow/bin/teamflow debug agent "$agent" >/dev/null 2>&1; then
     pass "agent $agent is discoverable"
   else
@@ -200,7 +263,9 @@ if grep -q 'plan-change' <<<"$SKILL_OUTPUT" && \
    grep -q 'basic-memory-cli' <<<"$SKILL_OUTPUT" && \
    grep -q 'memory-notes' <<<"$SKILL_OUTPUT" && \
    grep -q 'memory-capture' <<<"$SKILL_OUTPUT" && \
-   grep -q 'memory-continue' <<<"$SKILL_OUTPUT" && \
+   grep -q 'memory-recall' <<<"$SKILL_OUTPUT" && \
+   grep -q 'observe-inner-loop' <<<"$SKILL_OUTPUT" && \
+   grep -q 'write-handoff' <<<"$SKILL_OUTPUT" && \
    grep -q 'memory-curate' <<<"$SKILL_OUTPUT" && \
    grep -q 'extract-memory' <<<"$SKILL_OUTPUT" && \
    grep -q 'detect-emotional-salience' <<<"$SKILL_OUTPUT"; then

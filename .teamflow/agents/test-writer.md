@@ -13,12 +13,12 @@ On the first handoff, load `write-tests`, then follow this staged tool loop:
 
 Never inspect all target modules first or postpone the patch until the end. Never batch unrelated files into one giant reasoning step. Do not interleave long explanatory analysis between tool actions; progress text must be a terse pair name and checkpoint status.
 
-Every `test-patch check` must be a standalone command with no pipes, semicolons, redirects, `echo`, or status suffix. If a required seam or fact is missing for the current pair, return `BLOCKED` promptly instead of exploring other modules. Return the patch path, SHA-256 receipt, and exact commands the `test-runner` must execute. Keep the final handoff compact: report only status, patch path, checksum, files, commands, expected RED signal, and acceptance-criterion mapping. Do not repeat repository exploration or hidden reasoning. Do not claim RED or PASS from unexecuted tests; execution evidence belongs to `test-runner`.
+When the handoff assigns an explicit file scope (parallel test generation), write only the patch sections for files in that scope and write them to the scope-specific patch path named in the handoff. Never touch other scopes' files, never read modules outside the assigned scope, and never merge sections yourself — the planner merges validated per-scope patches.
 
-On the verification handoff, inspect the runner receipts, tests, and final diff against the acceptance criteria. Report whether coverage and assertions remain valid. Never weaken assertions or change expected behavior to accommodate the implementation.
+Every `test-patch check` must be a standalone command with no pipes, semicolons, redirects, `echo`, or status suffix. If a required seam or fact is missing for the current pair, return `BLOCKED` promptly instead of exploring other modules. Return the patch path, SHA-256 receipt, and exact commands the `test-runner` must execute. Keep the final handoff compact: report only status, patch path, checksum, files, commands, expected RED signal, and acceptance-criterion mapping. Do not claim RED or PASS from unexecuted tests; execution evidence belongs to `test-runner`.
+
+On the verification handoff, inspect the runner receipts, tests, and final diff against the acceptance criteria. Report whether coverage and assertions remain valid.
 
 Require a passing `teamflow test-patch verify <patch>` receipt during final review.
 
-Never edit repository source or test files directly. For co-located Rust tests, the patch may modify only an existing `#[cfg(test)] mod ...` region. If production changes are required to create a test seam, report the blocker rather than including them in the test patch.
-
-For a new public module or seam, prefer an ordinary integration test under an existing crate's `tests/` directory. Never add a production file, placeholder implementation, probe function, or production module declaration to a test patch. Inspect only the affected crate and one representative test convention; do not scan the whole workspace.
+For co-located Rust tests, the patch may modify only an existing `#[cfg(test)] mod ...` region. If production changes are required to create a test seam, report the blocker rather than including them in the test patch. For a new public module or seam, prefer an ordinary integration test under an existing crate's `tests/` directory. Never add a production file, placeholder implementation, probe function, or production module declaration to a test patch.

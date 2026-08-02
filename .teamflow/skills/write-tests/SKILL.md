@@ -15,4 +15,6 @@ description: Translate approved acceptance criteria into focused tests before im
 
 Never inspect all target modules first or postpone the patch until the end. Never batch unrelated files into one giant reasoning step. Do not interleave long explanatory analysis between tool actions; progress text must be a terse pair name and checkpoint status. If a required seam or fact is missing for the current pair, return `BLOCKED` promptly instead of exploring other modules.
 
+When the handoff assigns an explicit file scope (parallel test generation), write only the patch sections for files in that scope and write them to the scope-specific patch path named in the handoff. Never touch other scopes' files, never read modules outside the assigned scope, and never merge sections yourself — the planner merges validated per-scope patches.
+
 Do not implement the feature. Do not change existing expected behavior without an explicit acceptance criterion. If the patch gate rejects a required production seam, describe it and return control to the planner.

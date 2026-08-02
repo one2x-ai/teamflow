@@ -2,12 +2,13 @@
  * Teamflow task role launcher.
  *
  * Registers `task(agent, prompt)` and `task_group(tasks, max_concurrency)`
- * tools on the root planner process only (TEAMFLOW_AGENT_DEPTH === 0). Each
+ * tools only on depth-0 roles whose frontmatter declares `delegates: true`.
+ * Each
  * call spawns isolated `pi` children in JSON mode whose system prompt is the
  * Markdown body of `.teamflow/agents/<role>.md`, discovered by filename.
  * Frontmatter is parsed with Pi's parseFrontmatter; `model` must be
- * "<provider>/<model>", while `description` and `tools` are optional and
- * every other field is ignored. The Markdown agent files are the sole
+ * "<provider>/<model>", while `description`, `tools`, and the strict boolean
+ * `delegates` permission are optional. The Markdown agent files are the sole
  * source of truth for role identity.
  */
 
@@ -55,6 +56,22 @@ function listAvailableRoles(): string {
 		.map((name) => name.slice(0, -3))
 		.sort();
 	return roles.length > 0 ? roles.join(", ") : "none";
+}
+
+const delegatesCache = new Map<string, boolean>();
+
+function roleMayDelegate(role: string | undefined, depth: number): boolean {
+	if (!role || depth !== 0 || !ROLE_NAME_PATTERN.test(role)) return false;
+	const cached = delegatesCache.get(role);
+	if (cached !== undefined) return cached;
+	const agentPath = path.join(AGENTS_DIR, `${role}.md`);
+	if (!fs.existsSync(agentPath)) return false;
+	const { frontmatter } = parseFrontmatter<Record<string, unknown>>(
+		fs.readFileSync(agentPath, "utf-8"),
+	);
+	const result = frontmatter.delegates === true;
+	delegatesCache.set(role, result);
+	return result;
 }
 
 function getPiInvocation(args: string[]): { command: string; args: string[] } {
@@ -284,12 +301,12 @@ const TaskGroupParams = Type.Object({
 });
 
 export default function (pi: ExtensionAPI) {
-	// Only the root planner (depth 0) may delegate. Children run with
-	// TEAMFLOW_AGENT_DEPTH=1 and a non-planner TEAMFLOW_AGENT_ROLE, so the
-	// tools are never re-registered there.
+	// Delegation is an explicit role permission and is available only at depth
+	// 0. Children always run at depth 1, so they can never re-register tools
+	// even if their role frontmatter also contains `delegates: true`.
 	const role = process.env.TEAMFLOW_AGENT_ROLE;
 	const depth = Number(process.env.TEAMFLOW_AGENT_DEPTH ?? "0");
-	if (role !== "planner" || depth !== 0) return;
+	if (!roleMayDelegate(role, depth)) return;
 
 	pi.registerTool({
 		name: "task",

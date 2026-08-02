@@ -1,0 +1,173 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+cd "$ROOT_DIR"
+
+REF="main"
+OUTPUT_DIR=""
+INSTRUCTION="Preserve new upstream behavior when it is useful for this coding workflow."
+APPLY=false
+
+usage() {
+  cat <<'EOF'
+Usage: ./scripts/update.sh [options]
+
+Download current official Basic Memory Skills and prepare a descriptive update
+prompt that converts them into this repository's CLI-only variants.
+
+  --ref REF              Upstream Git ref, tag, or commit (default: main)
+  --output DIR           Snapshot/prompt directory (default: ignored .teamflow/)
+  --instruction TEXT     Additional update intent appended to the prompt
+  --apply                Run the generated prompt through the configured Planner
+  -h, --help             Show this help
+
+Without --apply the script only prepares upstream snapshots and UPDATE_PROMPT.md.
+EOF
+}
+
+while (( $# > 0 )); do
+  case "$1" in
+    --ref)
+      shift
+      REF="${1:-}"
+      ;;
+    --output)
+      shift
+      OUTPUT_DIR="${1:-}"
+      ;;
+    --instruction)
+      shift
+      INSTRUCTION="${1:-}"
+      ;;
+    --apply)
+      APPLY=true
+      ;;
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    *)
+      echo "error: unknown argument: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
+  if [[ -z "${1:-}" ]]; then
+    echo "error: option value cannot be empty" >&2
+    exit 1
+  fi
+  shift
+done
+
+if [[ -z "$OUTPUT_DIR" ]]; then
+  timestamp="$(date -u +'%Y%m%dT%H%M%SZ')"
+  OUTPUT_DIR="$ROOT_DIR/.teamflow/basic-memory-skill-update/$timestamp"
+elif [[ "$OUTPUT_DIR" != /* ]]; then
+  OUTPUT_DIR="$ROOT_DIR/$OUTPUT_DIR"
+fi
+
+UPSTREAM_DIR="$OUTPUT_DIR/upstream"
+PROMPT_FILE="$OUTPUT_DIR/UPDATE_PROMPT.md"
+SKILLS=(memory-notes memory-capture memory-curate)
+mkdir -p "$UPSTREAM_DIR"
+
+for skill_name in "${SKILLS[@]}"; do
+  skill_dir="$UPSTREAM_DIR/$skill_name"
+  mkdir -p "$skill_dir"
+  url="https://api.github.com/repos/basicmachines-co/basic-memory/contents/skills/$skill_name/SKILL.md"
+  echo "Fetching $skill_name from $REF..."
+  curl -LfsS --max-time 30 \
+    -H 'Accept: application/vnd.github.raw+json' \
+    --get --data-urlencode "ref=$REF" \
+    "$url" -o "$skill_dir/SKILL.md"
+done
+
+{
+  cat <<'EOF'
+# Basic Memory CLI-only Skill update
+
+Update the four local Skills below using the downloaded official snapshots as
+reference material. Preserve useful upstream concepts, but rewrite the result
+for this repository's CLI-only coding workflow.
+EOF
+  printf '\nUpstream ref: %s\n' "$REF"
+  printf 'Upstream snapshots: %s\n' "$UPSTREAM_DIR"
+  printf 'Local targets: %s\n' "$ROOT_DIR/.teamflow/skills/memory-{notes,capture,continue,curate}/SKILL.md"
+  printf 'CLI adapter: %s\n' "$ROOT_DIR/.teamflow/skills/basic-memory-cli/SKILL.md"
+  printf '\nAdditional intent:\n%s\n' "$INSTRUCTION"
+  cat <<'EOF'
+
+Required behavior:
+
+1. Read all four upstream snapshots, all four local target files, the CLI
+   adapter, AGENTS.md, and `.teamflow/bin/memory` before editing.
+2. Keep only `name` and `description` in each YAML frontmatter. Make each
+   description state what the Skill does and when it should trigger.
+3. Remove every MCP reference and every function-call example such as
+   `search_notes(...)`, `write_note(...)`, `read_note(...)`,
+   `build_context(...)`, and `recent_activity(...)`.
+4. Replace operations with exact supported commands:
+   - `teamflow memory recall|read|context|list|remember|remember-global`
+   - `teamflow memory-capture --receipt <verified-task-receipt>`
+   - `basic-memory tool search-notes|write-note|read-note|edit-note|build-context|recent-activity`
+5. Add `--project teamflow --local` to direct note commands. Use
+   `BASIC_MEMORY_SEMANTIC_SEARCH_ENABLED=false` for offline full-text search.
+6. Keep shared data under `~/.teamflow/memory`; never introduce cloud
+   login, cloud sync, account setup, or a server process.
+7. Respect workflow policy: automated task capture must use the verified-task
+   receipt and Emotion -> DeepSeek -> GLM -> MiMo pipeline after checks report
+   PASS. Keep remember/remember-global only as explicit manual operations; never
+   store secrets, raw transcripts, logs, or guesses.
+8. Prefer concise Skills. Do not add README, changelog, or auxiliary files.
+9. Never add deletion examples; deletion requires explicit user authorization.
+10. Validate shell examples against Basic Memory's current `--help` output.
+
+Acceptance checks:
+
+- No MCP text remains in the four local target files.
+- No underscore-style tool invocation remains.
+- All four folders pass the Skill frontmatter validator.
+- `bash -n scripts/*.sh .teamflow/bin/*` and `git diff --check` pass.
+- Summarize upstream behavior adopted, behavior intentionally omitted, and all
+  validation evidence.
+EOF
+} > "$PROMPT_FILE"
+
+echo "Prepared update prompt: $PROMPT_FILE"
+
+if [[ "$APPLY" == true ]]; then
+  echo "Applying update through the configured Planner..."
+  "$ROOT_DIR/.teamflow/bin/teamflow" run --agent planner "$(cat "$PROMPT_FILE")"
+fi
+
+if [[ "$APPLY" == true ]]; then
+  if rg -n '\bMCP\b|search_notes\(|write_note\(|read_note\(|build_context\(|recent_activity\(|list_memory_projects\(' \
+    .teamflow/skills/memory-{notes,capture,continue,curate}/SKILL.md; then
+    echo "error: CLI-only validation found forbidden upstream syntax" >&2
+    exit 1
+  fi
+
+  node - .teamflow/skills/memory-{notes,capture,continue,curate}/SKILL.md <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+for (const file of process.argv.slice(2)) {
+  const text = fs.readFileSync(file, "utf8");
+  const match = text.match(/^---\n([\s\S]*?)\n---\n/);
+  if (!match) throw new Error(`${file}: missing YAML frontmatter`);
+  const keys = match[1].split("\n").filter(Boolean).map(line => line.split(":", 1)[0]);
+  if (keys.join(",") !== "name,description") {
+    throw new Error(`${file}: frontmatter must contain only name and description`);
+  }
+  const expected = path.basename(path.dirname(file));
+  const name = match[1].match(/^name:\s*(.+)$/m)?.[1];
+  if (name !== expected) throw new Error(`${file}: name must be ${expected}`);
+}
+NODE
+
+  bash -n scripts/*.sh .teamflow/bin/*
+  git diff --check
+  echo "CLI-only Skill update validation passed."
+else
+  echo "Review or submit the prompt above; rerun with --apply to automate the update."
+fi

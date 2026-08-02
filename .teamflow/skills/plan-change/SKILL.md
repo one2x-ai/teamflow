@@ -14,18 +14,4 @@ description: Convert a software change request into an executable, test-first pl
 
 ## Handoff
 
-```text
-Goal:
-Scope:
-Acceptance:
--
-Constraints:
--
-Initial test target:
-Evidence collected:
--
-Open questions:
--
-```
-
-Reject vague criteria such as "works correctly", "is robust", or "tests pass". Name the input, behavior, and expected observable output.
+Author the delegation handoff with the `write-handoff` skill, which defines the goal/scope/acceptance/constraints/evidence/open-questions structure and the mandatory self-check. Keep evidence to commands already executed; do not narrate the exploration process.

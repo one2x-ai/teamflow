@@ -1,4 +1,0 @@
-interface:
-  display_name: "Verify Change"
-  short_description: "Run gates and report evidence for completed changes"
-  default_prompt: "Use $verify-change to validate the implementation and report evidence."

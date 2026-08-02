@@ -31,11 +31,11 @@ SCRIPTS = ROOT / "scripts"
 AGENTS_MD = ROOT / "AGENTS.md"
 README_MD = ROOT / "README.md"
 BOOTSTRAP = SCRIPTS / "bootstrap.sh"
-SETUP_MEMORY = SCRIPTS / "setup-memory.sh"
-INIT_PROJECT = SCRIPTS / "init-project.sh"
+SETUP_MEMORY = SCRIPTS / "setup.sh"
+INIT_PROJECT = SCRIPTS / "install.sh"
 DOCTOR = SCRIPTS / "doctor.sh"
 TEAMFLOW_CLI = ROOT / ".teamflow" / "bin" / "teamflow"
-PRUNE_RUNS = SCRIPTS / "teamflow-prune-runs"
+PRUNE_RUNS = SCRIPTS / "clean.py"
 
 LEGACY_ENV_TOKENS = (
     "WORKFLOW_HOME",
@@ -102,15 +102,58 @@ class ActiveScriptsHaveNoLegacyFallbackTests(unittest.TestCase):
 
 
 class ActiveDocsHaveNoOpenCodeOrLegacyFallbackTests(unittest.TestCase):
-    """A: README and AGENTS.md carry no OpenCode runtime claims or legacy fallback."""
+    """A: README and AGENTS.md carry no OpenCode runtime claims or legacy fallback.
+
+    The original guard banned the word "opencode" outright, because the docs
+    once claimed OpenCode was the agent runtime. Pi is the runtime, and that
+    claim must stay gone.
+
+    opencode is now something different: the outer loop that `teamflow
+    server` connects to as an upstream API. Naming it in that role is
+    correct, so the guard targets the false runtime claims and the legacy
+    config surface instead of the bare word.
+    """
+
+    # Phrasings that would reinstate the retired claim, or point at the
+    # legacy per-project OpenCode config that no longer exists. Naming
+    # opencode as the upstream outer loop is correct and not listed here.
+    FORBIDDEN_RUNTIME_CLAIMS = (
+        "opencode runtime",
+        "opencode agent runtime",
+        "opencode harness",
+        ".opencode/",
+        "opencode.json",
+        "opencode.jsonc",
+        "opencode.db",
+        "@opencode-ai",
+    )
 
     def _assert_clean_docs(self, source: str, label: str):
         lowered = source.lower()
-        self.assertNotIn("opencode", lowered, f"{label}: no OpenCode runtime claims")
+        for claim in self.FORBIDDEN_RUNTIME_CLAIMS:
+            with self.subTest(doc=label, claim=claim):
+                self.assertNotIn(
+                    claim,
+                    lowered,
+                    f"{label}: '{claim}' reinstates the retired OpenCode runtime claim",
+                )
         for token in LEGACY_ENV_TOKENS:
             with self.subTest(doc=label, token=token):
                 self.assertNotIn(token, source)
         self.assertNotIn("旧安装迁移", source, f"{label}: legacy migration section removed")
+
+    def test_readme_names_pi_as_the_runtime(self):
+        """The positive half: README must still name Pi as the runtime.
+
+        Only README is checked. AGENTS.md defines roles, sequence, and
+        engineering rules for the outer loop; naming the runtime is not its
+        job, so requiring it there would be a false contract.
+        """
+        self.assertRegex(
+            read(README_MD),
+            r"[Pp]i (runtime|agent)|pi-runtime",
+            "README.md must state that Pi is the runtime",
+        )
 
     def test_readme_has_no_opencode_or_legacy_fallback(self):
         self._assert_clean_docs(read(README_MD), "README.md")
@@ -153,7 +196,7 @@ class ExperimentsRemainInstalledAndCheckedTests(unittest.TestCase):
 
 
 class RunRetentionHelperTests(unittest.TestCase):
-    """F: teamflow-prune-runs deletes only raw runs scratch, preserving artifacts."""
+    """F: clean deletes only raw runs scratch, preserving artifacts."""
 
     def _make_tree(self, root: Path) -> dict[str, Path]:
         runs = root / ".teamflow" / "runs"
@@ -202,8 +245,8 @@ class RunRetentionHelperTests(unittest.TestCase):
         return keep
 
     def test_helper_exists_and_is_executable(self):
-        self.assertTrue(PRUNE_RUNS.is_file(), "scripts/teamflow-prune-runs must exist")
-        self.assertTrue(os.access(PRUNE_RUNS, os.X_OK), "scripts/teamflow-prune-runs must be executable")
+        self.assertTrue(PRUNE_RUNS.is_file(), "scripts/clean must exist")
+        self.assertTrue(os.access(PRUNE_RUNS, os.X_OK), "scripts/clean must be executable")
 
     def test_dry_run_deletes_nothing(self):
         self.assertTrue(PRUNE_RUNS.is_file())

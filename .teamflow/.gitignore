@@ -1,0 +1,26 @@
+# This directory holds Pi-agent runtime content only: agents/, skills/,
+# extensions/, bin/, and the installable server source. Entries below are
+# either local build state or configuration owned by a different AI harness.
+# Ignoring them lets another tool drop its config here without turning it
+# into a managed artifact that install.sh would copy into every project.
+#
+# This file is tracked on purpose: the exclusions are a shared convention,
+# so a fresh clone must inherit them. It is not part of the installer's
+# managed file set, so it never reaches a business project.
+
+# Safety net only: this directory is not an npm project. Extensions resolve
+# their dependencies through Pi's own installation. If these files appear,
+# tests/test_runtime_content_ownership.py::TeamflowDirectoryIsNotNpmProjectTests fails.
+node_modules
+package.json
+package-lock.json
+bun.lock
+
+# Other AI harness configuration and interface metadata (no consumer here)
+openai.yaml
+openai.yml
+.codex/
+CLAUDE.md
+CLAUDE.local.md
+.cursor/
+.windsurf/

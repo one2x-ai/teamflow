@@ -8,7 +8,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INITIALIZER = ROOT / "scripts" / "init-project.sh"
+INITIALIZER = ROOT / "scripts" / "install.sh"
 RUNTIME = ROOT / ".teamflow" / "bin" / "pi-runtime"
 WRAPPER = ROOT / ".teamflow" / "bin" / "teamflow"
 
@@ -28,9 +28,9 @@ class SharedContextLayoutTests(unittest.TestCase):
 
 
 class PiContextAssemblyTests(unittest.TestCase):
-    def test_runtime_keeps_pi_context_discovery_enabled_without_duplicate_append(self):
+    def test_runtime_disables_pi_context_files_for_visible_xml_injection(self):
         source = RUNTIME.read_text(encoding="utf-8")
-        self.assertNotIn("--no-context-files", source)
+        self.assertIn("--no-context-files", source)
         self.assertNotIn("--append-system-prompt", source)
 
         with tempfile.TemporaryDirectory() as home:
@@ -48,7 +48,7 @@ class PiContextAssemblyTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         payload = json.loads(completed.stdout)
         self.assertEqual(Path(payload["env"]["PI_CODING_AGENT_DIR"]), ROOT / ".teamflow")
-        self.assertNotIn("--no-context-files", payload["argv"])
+        self.assertIn("--no-context-files", payload["argv"])
         self.assertNotIn("--append-system-prompt", payload["argv"])
 
 

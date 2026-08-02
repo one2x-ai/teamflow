@@ -2,6 +2,12 @@
 
 This repository defines and evolves Teamflow, a multi-agent coding system.
 
+## Architectural self-consistency
+
+Any change to this repository — product code, tests, scripts, prompts, or documentation — goes through teamflow's agents. An outer loop may write the handoff, observe phase metadata, verify artifacts, and commit; it may not implement, fix, or refactor. When a delegation returns something wrong, the outer loop collects the failure receipt and delegates again. This exercises the process on itself so defects surface here, not in business projects.
+
+Narrow exceptions: writing or correcting the handoff itself; reverting a bad change with git; temporarily breaking something to prove a test fails, then restoring it (verification, not implementation); emergency recovery when the agent path itself is broken — say so in the report.
+
 ## Roles
 
 - `planner` uses GLM-5.2 and owns requirement analysis, acceptance criteria, delegation, and the final summary.
@@ -10,6 +16,8 @@ This repository defines and evolves Teamflow, a multi-agent coding system.
 - `coder` uses Kimi K3, focuses on product-code implementation, and must not redefine the acceptance criteria.
 - `command` uses MiMo 2.5 Pro for explicit shell, Git, and GitHub operations that need semantic interpretation but no code edits or multi-agent planning.
 - `memory-compressor`, `memory-extractor`, and `memory-formatter` form the curated serial memory pipeline; GLM-5.2 owns both extraction and final formatting. Models may write only below `.teamflow/runs/memory/` and must never write Basic Memory directly.
+
+Only depth-0 roles with the strict boolean frontmatter declaration `delegates: true` may receive `task` and `task_group`. Child roles always run at depth 1 and may never delegate further.
 
 Use this sequence unless the request is documentation-only or cannot be tested:
 
@@ -28,16 +36,7 @@ If test-first execution is skipped, state the concrete reason in the final repor
 
 ## Handoff contract
 
-Every handoff between agents must contain:
-
-- Goal: one observable outcome.
-- Scope: files or components that may change.
-- Acceptance: verifiable criteria.
-- Constraints: compatibility, security, and non-goals.
-- Evidence: commands and results already obtained.
-- Open questions: unresolved facts that can affect implementation.
-
-Do not hand off vague requests such as "fix it" or "make tests pass".
+A structured handoff is required for every delegation; author it with the `write-handoff` skill. Do not hand off vague requests such as "fix it" or "make tests pass".
 
 ## Engineering rules
 
@@ -53,6 +52,9 @@ Do not hand off vague requests such as "fix it" or "make tests pass".
 - Run `teamflow source-check` after code edits to reject accidental non-printing control bytes.
 - Keep target-project integration limited to the standard `.teamflow/` entry in `.gitignore`; do not scatter runtime files across the repository root.
 - Keep Agent prompts and Skills concise; put shared policy here instead of duplicating it.
+- Put a test next to the code it exercises: `tests/` for `scripts/`, `.teamflow/tests/` for the installable runtime, `server/tests/` for the Bun service. Neither `.teamflow/tests/` nor `server/tests/` may ship to a target project.
+- Keep `.teamflow/` limited to Pi-agent runtime content. Another harness's config (`openai.yaml`, `CLAUDE.md`, `.codex/`) belongs in `.teamflow/.gitignore`, not in the managed file set.
+- Install product files only. Teamflow's own development context — test suites, `runs/`, `sessions/`, credentials, `docs/`, and the repository-level `AGENTS.md` and `README.md` — must never reach a business project.
 
 ## External loop observation
 
@@ -72,11 +74,12 @@ Basic Memory is the fully local shared memory backend. This repository contains 
 
 ## Maintaining this repository
 
-When changing Agent models, permissions, Teamflow phase order, environment variables, or scripts:
+When changing Agent models, permissions, Teamflow phase order, environment variables, frontmatter contracts, or scripts:
 
 1. Update the implementation.
 2. Update README usage and architecture notes.
-3. Run `./scripts/doctor.sh`.
-4. Confirm all project Agents and Skills appear in `teamflow debug` output.
-5. Dry-run `./scripts/init-project.sh` against a disposable Git project when installable files change.
-6. Keep the four Basic Memory Skills CLI-only; use `./scripts/update-basic-memory-skills.sh` to prepare upstream refreshes.
+3. Update `.teamflow/AGENTS.md` shared constraints when frontmatter contracts change.
+4. Run `./scripts/doctor.sh`.
+5. Confirm all project Agents and Skills appear in `teamflow debug` output.
+6. Dry-run `./scripts/install.sh` against a disposable Git project when installable files change.
+7. Keep the four Basic Memory Skills CLI-only; use `./scripts/update.sh` to prepare upstream refreshes.

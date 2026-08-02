@@ -101,6 +101,42 @@ else
   echo "Installed teamflow launcher: $LAUNCHER_PATH"
 fi
 
+# The memory browser reads the shared cross-project store, so one global copy
+# serves every project instead of being installed per project.
+#
+# The front end is built here, in the repository, where node_modules and the
+# dev dependencies live. Only the build output is synced: the global copy has
+# no node_modules, so running the build there would fail.
+TEAMFLOW_HOME="${TEAMFLOW_HOME:-$HOME/.teamflow}"
+SERVER_TARGET="$TEAMFLOW_HOME/server"
+if [[ -d "$ROOT_DIR/server" ]]; then
+  if [[ -d "$ROOT_DIR/server/web" ]]; then
+    echo "Building web front end..."
+    # A build failure degrades to a warning: the memory API and the CLI do not
+    # depend on the front end, so bootstrap must not fail because of it.
+    (cd "$ROOT_DIR/server" && bun install --registry "${NPM_REGISTRY:-https://registry.npmjs.org}" >/dev/null 2>&1 \
+      && bun run build >/dev/null 2>&1) \
+      || echo "warning: web front-end build failed; run 'cd server && bun install && bun run build' manually" >&2
+  fi
+
+  mkdir -p "$SERVER_TARGET"
+  while IFS= read -r relative_path; do
+    mkdir -p "$SERVER_TARGET/$(dirname "$relative_path")"
+    install -m 0644 "$ROOT_DIR/server/$relative_path" "$SERVER_TARGET/$relative_path"
+  done < <(
+    cd "$ROOT_DIR/server"
+    # Ship runnable sources plus the built front end. node_modules, tests, and
+    # lockfiles stay in the repository; web/dist is the one build artifact the
+    # global copy needs in order to serve /app.
+    find . -type f ! -path './node_modules/*' ! -path './tests/*' \
+      ! -name '*.test.ts' ! -path '*/__tests__/*' \
+      ! -path './dist/*' ! -path './web/node_modules/*' \
+      ! -name 'bun.lock' ! -name 'bun.lockb' \
+      ! -path '*/__pycache__/*' ! -name '*.pyc' -print | sed 's#^\./##' | sort
+  )
+  echo "Installed memory browser: $SERVER_TARGET"
+fi
+
 echo "Pi $(pi --version) is available."
 echo "$(basic-memory --version) is available."
-echo "Next: edit .env, run setup-memory.sh and doctor.sh, then init-project.sh <target-project>."
+echo "Next: edit .env, run ./scripts/setup.sh and ./scripts/doctor.sh, then ./scripts/install.sh <target-project>."

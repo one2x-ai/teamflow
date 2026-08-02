@@ -9,7 +9,10 @@ This working repository uses Teamflow's test-first multi-agent process.
 - `test-runner` owns test execution and structured error receipts; it never edits files.
 - `coder` uses Kimi K3, focuses on the smallest coherent product-code implementation, and must not redefine acceptance criteria.
 - `command` uses MiMo 2.5 Pro for explicit shell, Git, and GitHub operations that require no code edits or multi-agent planning.
+- `supervisor` uses MiMo 2.5 Pro for deterministic mechanical checks — artifact existence, checksums, and test-patch gates — without editing files or delegating.
 - `emotional-salience-sensor`, `memory-compressor`, `memory-extractor`, and `memory-formatter` form the serial capture pipeline; GLM-5.2 owns both extraction and final formatting. Models write only below `.teamflow/runs/memory/`; deterministic apply writes safe new notes and defers update/supersede proposals.
+
+Only depth-0 roles with the strict boolean frontmatter declaration `delegates: true` may receive `task` and `task_group`. Child roles always run at depth 1 and may never delegate further. Roles that declare `needs_project_rules: false` (such as `test-runner` and `command`) skip AGENTS.md injection; they receive only their own system prompt and the handoff message.
 
 ## Required sequence
 
@@ -32,7 +35,7 @@ For command-only requests such as branch creation, committing an already-reviewe
 
 ## Handoff contract
 
-Every handoff must include goal, scope, acceptance criteria, constraints, evidence already obtained, and open questions. Do not hand off vague requests.
+A structured handoff is required for every delegation; author it with the `write-handoff` skill. Do not hand off vague requests.
 
 ## Engineering rules
 
@@ -45,6 +48,17 @@ Every handoff must include goal, scope, acceptance criteria, constraints, eviden
 - Wrap delegated code phases with `teamflow phase start/finish`; explicit provider timeout, authentication, quota, overload, transport failure, and user cancellation are `BLOCKED`, not implicit retries of the full Teamflow process. There is no local wall-time timeout by default, so silence while a provider queues is not failure evidence.
 - A delegated response ending with `finish=length` is output truncation, not a successful empty handoff. If its mandatory artifact is absent, finish the phase as `BLOCKED` with the truncation and missing-artifact reasons; do not silently retry inside the same phase.
 - Run `teamflow source-check` after implementation edits and before test execution.
+
+## Outer loop observation
+
+An outer coordinator that watches this inner loop must load `observe-inner-loop` and observe metadata only. It is not doing the work, so it must not pay for the inner loop's context.
+
+- Detect the execution path with `teamflow phase status --run-id <id>` (add `--phase <name>` for history) and `teamflow session list --format json`.
+- Confirm progress by testing existence and non-emptiness of expected paths under `.teamflow/runs/`; do not read artifact bodies.
+- Never read session files, prompts, reasoning, model responses, raw provider errors, configuration, or credentials.
+- `RUNNING` with `stale: true` means observation time exceeded `TEAMFLOW_PHASE_TIMEOUT_SECONDS`; it is not a failure. `BLOCKED` is the only stop signal.
+- Poll at most every 30 seconds, report only status or phase transitions, and stay silent while state is unchanged.
+- Terminal silence and elapsed wall time alone are never failure evidence and must not terminate the inner loop.
 
 ## Shared memory
 

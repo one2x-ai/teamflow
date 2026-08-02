@@ -49,7 +49,7 @@ shell 环境变量优先级最高；业务项目的 `.teamflow/.env` 可作为�
 初始化本地跨项目记忆并检查模板：
 
 ```bash
-./scripts/setup-memory.sh
+./scripts/setup.sh
 ./scripts/doctor.sh
 ```
 
@@ -58,13 +58,13 @@ shell 环境变量优先级最高；业务项目的 `.teamflow/.env` 可作为�
 先预览：
 
 ```bash
-./scripts/init-project.sh --dry-run /path/to/project
+./scripts/install.sh --dry-run /path/to/project
 ```
 
 再安装：
 
 ```bash
-./scripts/init-project.sh /path/to/project
+./scripts/install.sh /path/to/project
 cd /path/to/project
 teamflow
 ```
@@ -82,8 +82,25 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 - 业务项目已有的 `AGENTS.md`、配置、脚本和源码完全保留。
 - manifest 位于 `.teamflow/manifest.json`，用于幂等更新和冲突检测。
 - 用户修改过的受管文件不会被静默覆盖；`--force` 会先备份到 `~/.teamflow/backups/`。
+- 只安装产品文件。Teamflow 自身的开发上下文不会进入业务项目：三层测试目录、`runs/`、`sessions/`、凭证（`auth.json`、`models-store.json`、`.env`）、`docs/` 设计文档、仓库级 `AGENTS.md` 与 `README.md` 全部排除；业务项目只收到 `.teamflow/AGENTS.md` 这份共享约束。
+- 模板移除某个受管文件后，重装会同步删除业务项目中的旧副本，并回收清空的目录；仅当该文件仍与上次 manifest 记录逐字节一致时才删除，用户改动过的文件保留并告警。
 
 除 `.gitignore` 的标准目录规则外，安装前后业务仓库的 `git status --short` 应保持不变。
+
+## 卸载
+
+```bash
+./scripts/uninstall.sh --dry-run                      # 预览
+./scripts/uninstall.sh                                # 只清理全局命令
+./scripts/uninstall.sh --project /path/to/project     # 同时清理该项目运行时
+./scripts/uninstall.sh --project /path/to/project --memory  # 连本地记忆一起删除
+```
+
+默认删除全局入口 `~/.local/bin/teamflow` 与全局记忆浏览服务 `~/.teamflow/server/`；入口仅当带有 teamflow 标记时才动手，不会误删同名的第三方命令。
+
+`--project` 会删除该项目的 `.teamflow/` 目录，并只移除安装器写入的 `.teamflow/` 忽略规则与其说明行，业务项目自己的 `.gitignore` 规则完整保留。
+
+`--memory` 才会删除 `~/.teamflow/memory/`。跨项目记忆是用户知识，不加该参数永不删除。
 
 ## 目标项目布局
 
@@ -96,7 +113,14 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 │   ├── planner.md
 │   ├── test-writer.md
 │   ├── test-runner.md
-│   └── coder.md
+│   ├── coder.md
+│   ├── command.md
+│   ├── supervisor.md
+│   ├── emotional-salience-sensor.md
+│   ├── memory-compressor.md
+│   ├── memory-extractor.md
+│   ├── memory-formatter.md
+│   └── memory-indexer.md
 ├── skills/
 ├── bin/                      # 仅正式流程入口
 │   ├── teamflow              # 项目内入口
@@ -105,8 +129,9 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"
 │   ├── test-patch            # 测试补丁门禁
 │   └── server                # 只读本地记忆浏览服务
 ├── extensions/
-│   └── teamflow-task/        # task(agent, prompt) 角色启动器（仅 planner 深度 0 注册）
-├── server/                   # Bun + TypeScript HTTP 服务源码
+│   ├── teamflow-task/        # task(agent, prompt) 角色启动器（仅显式授权的深度 0 角色注册）
+│   └── memory-context/       # Phase A 观察模式状态机（监听 hook）+ Phase B 冷记忆持久化（turn-block/cold-memory-store/file-cold-store）+ Phase C 可见 XML 上下文注入 + Phase D 热区投影与 no-compact 拦截 + Phase E 准则 cache（rule-cache/rule-cache-reducer）
+│                             # 注：server 源码不在此处，见全局 ~/.teamflow/server/
 ├── experiments/bin/          # 显式调用的临时实验，不由 teamflow 命令暴露
 └── runs/                     # 临时运行产物
 ```
@@ -125,9 +150,23 @@ teamflow debug skill                        # 列出项目 .teamflow/skills/ 中
 teamflow session list --format json         # 仅输出会话元数据（id/model/provider/时间/message_count）
 ```
 
-角色身份由 `agents/<role>.md` 的 Markdown frontmatter 唯一确定：`model`（`<provider>/<model>`）映射到 provider 与模型，文件正文即系统提示；`test-runner` 通过 frontmatter 的 `tools` 排除 edit 保持只读。Pi 会从 `PI_CODING_AGENT_DIR=.teamflow` 自动追加 `.teamflow/AGENTS.md`，并继续追加业务项目根目录已有的 `AGENTS.md`；运行器不再显式追加同一文件，避免重复注入。会话目录默认读取 `TEAMFLOW_PI_SESSION_DIR`，未设置时回退到 `$PI_CODING_AGENT_DIR/sessions`。
+角色身份由 `agents/<role>.md` 的 Markdown frontmatter 唯一确定：`model`（`<provider>/<model>`）映射到 provider 与模型，文件正文即系统提示；`test-runner` 通过 frontmatter 的 `tools` 排除 edit 保持只读。`pi-runtime` 传递 `--no-context-files`，Pi 不再自动拼接 AGENTS.md；改为由 `memory-context` 扩展在 `before_agent_start` 时读取项目根目录 `AGENTS.md` 并以可见 XML 消息注入（见 Phase C）。声明 `needs_project_rules: false` 的角色（如 `test-runner`、`command`）跳过 AGENTS.md 注入以节省 token。会话目录默认读取 `TEAMFLOW_PI_SESSION_DIR`，未设置时回退到 `$PI_CODING_AGENT_DIR/sessions`。
 
-`pi-runtime run` 会通过 `--extension` 加载 `.teamflow/extensions/teamflow-task/index.ts` 并导出 `TEAMFLOW_AGENT_ROLE`/`TEAMFLOW_AGENT_DEPTH=0`。该扩展仅在深度 0（planner）注册 `task(agent, prompt)` 工具：按文件名在 `.teamflow/agents/` 中解析角色 Markdown，用 frontmatter 的 `model`（`<provider>/<model>`）与可选 `tools` 启动隔离的 pi 子进程（JSON 模式），子进程环境为 `TEAMFLOW_AGENT_ROLE=<role>`、`TEAMFLOW_AGENT_DEPTH=1`，未知角色、非零退出、取消以及 `stopReason` 为 `error`/`aborted`/`length` 时显式失败。
+`pi-runtime run` 会通过 `--extension` 加载 `.teamflow/extensions/teamflow-task/index.ts` 并导出 `TEAMFLOW_AGENT_ROLE`/`TEAMFLOW_AGENT_DEPTH=0`。角色只有在 Markdown frontmatter 中以严格布尔值声明 `delegates: true` 且运行深度为 0 时，才会注册 `task(agent, prompt)` 与 `task_group`；缺失、`false` 或字符串形式的值都不授权。扩展按文件名在 `.teamflow/agents/` 中解析角色 Markdown，用 frontmatter 的 `model`（`<provider>/<model>`）与可选 `tools` 启动隔离的 pi 子进程（JSON 模式），子进程环境为 `TEAMFLOW_AGENT_ROLE=<role>`、`TEAMFLOW_AGENT_DEPTH=1`，因此子角色即使带有同一声明也不能继续委派。未知角色、非零退出、取消以及 `stopReason` 为 `error`/`aborted`/`length` 时显式失败。
+
+`pi-runtime run` 还会通过第二个 `--extension` 加载 `.teamflow/extensions/memory-context/index.ts`。该扩展注册 `before_agent_start`、`agent_settled`、`session_start`、`tool_call` 和 `tool_result` hook，跟踪轮次边界和工具因果对，在每轮 `agent_settled` 时计算 SHA-256 观察清单（systemPromptHash、contextMessagesHash、manifestHash），校验工具因果对（unmatchedCalls/unmatchedResults），并通过 `appendEntry('teamflow:observation', ...)` 追加每轮一条不可变观察收据。扩展不添加隐藏系统提示；上下文投影与 compact 拦截由 Phase D 实现（见下）。
+
+Phase B 冷记忆持久化已接入运行时：每轮 `agent_settled` 时，扩展从会话条目中提取当前轮的 user/assistant/toolResult 消息（文本先经 `redactSecrets` 过滤已知密钥模式），构建包含完整消息内容的 TurnBlock，并通过可替换的 `ColdMemoryStore` 接口（默认 `FileColdStore`，根目录可用 `TEAMFLOW_COLD_MEMORY_ROOT` 覆盖）持久化。写入结果以 `appendEntry('teamflow:cold_memory_persistence', ...)` 每轮一条回执记录：成功为 `status: "persisted"` 并附存储引用，失败为 `status: "failed"` 且 `reason: "MEMORY_PERSISTENCE_FAILED"`，绝不伪装成功。其中 `turn-block.ts` 定义不可变 TurnBlock 类型及其规范 XML 序列化（固定属性顺序、实体转义、`<messages>` 消息体、SHA-256 content hash），`cold-memory-store.ts` 声明纯存储接口（writeTurn、readTurn、readByOffset，零 basic-memory 依赖），`file-cold-store.ts` 实现基于文件系统的 ColdMemoryStore（原子写入、hash 校验、路径段验证、偏移读取语义）。冷存储默认写入 `~/.teamflow/memory/state/cold-store/`（而非 `knowledge/`），因此不会污染 Basic Memory 的 Markdown 源树，也不会触发 pending dirty source；该模块由旧的 basic-memory-adapter 更名而来，原因是它实际把原始 XML 写入独立的 state 目录，而非把 Markdown 笔记写入 Basic Memory knowledge。这些模块为 Phase C+ 的上下文接管奠定基础。
+
+Phase C 可见 XML 上下文注入已接入：`pi-runtime run` 现在在 argv 中传递 `--no-context-files`，Pi 不再自动把 AGENTS.md/CLAUDE.md 拼入系统提示；改为由扩展的 `before_agent_start` 返回一条 `display: true` 的可见 XML 自定义消息（customType 为 `teamflow:context`），同时参与 LLM 上下文与 UI 展示。该 XML 以 `<teamflow_context>` 包裹，内含 `<context_manifest>` 清单列出每个来源的 `kind` 与 `hash`（当前为 `kind="project_rules"`、`ref="AGENTS.md"`、`hash="sha256:..."`），项目规则文件内容经 XML 转义后放入 `<project_rules>` 段。不存在隐藏的 `systemPrompt` 字符串拼接。
+
+Phase D 热区接管与 no-compact 已接入：扩展注册 `context` hook，对即将发送给 LLM 的会话消息深拷贝执行热区投影——保留最新的 `teamflow:context` 项目规则消息、最近一个已完成轮（latest completed turn）与当前活动轮（active turn）；更早的轮次从投影中逐出（evicted），但不生成任何替代文本，完整 TurnBlock 仍在 FileColdStore 中可精确召回；投影边界不会拆散 tool call / tool result 因果对（首个保留消息为 toolResult 时会回退纳入其匹配的 assistant toolCall）。`session_before_compact` 对所有 reason（manual/threshold/overflow）返回 `{ cancel: true }` 并追加 `teamflow:compact_intercepted` 回执；若 `session_compact` 仍触发，则追加 `teamflow:compact_violation` 不变量违例回执。`.teamflow/settings.json` 同时声明 `compaction.enabled=false`，由 `scripts/install.sh` 随目标项目分发、`doctor.sh` 校验。当受保护上下文超出模型预算（remaining < 0）时，扩展追加 `CONTEXT_BUDGET_EXCEEDED` 结构化失败回执（含 limit/used/remaining 证据，`requiredAction: "REPLAN_AND_SPLIT"`），而不是 compact-and-retry。
+
+Phase E 准则 cache（rule cache）已接入：`rule-cache.ts` 定义受保护的准则层 schema（Rule/RuleCache/MemoryDelta）、规范 XML 序列化（固定属性顺序、实体转义、SHA-256 content hash，hash 输入排除 content_hash 字段）以及 `<memory_delta>` 增量格式（assert / supersede / retire）和 `validateDelta()` 结构完整性校验；`rule-cache-reducer.ts` 实现权限感知的纯函数增量 reducer `applyDelta()`——未被提及的规则永不删除，低权限来源（rank：repository/system_policy 5 > user 4 > planner 3 > tool_evidence 2 > candidate 1）不能覆盖/supersede/retire 高权限规则，推断内容只能以 `candidate` 状态进入，tool_evidence 必须引用原始事件，supersede/retire 保留旧规则仅供审计。扩展在 `before_agent_start` 把当前准则 cache（仅 active/candidate 规则）作为可见 `<rule_cache>` XML 段注入 teamflow_context，并在 context_manifest 中登记 `kind="rule_cache"` 来源；`agent_settled` 仅在本轮 teamflow_result 非截断（finish=length 拒绝）、状态为 PASS 且 memory_delta 通过结构校验时才应用 delta 并以 `teamflow:rule_cache` 自定义条目持久化新 cache；`session_start` 恢复最新持久化条目前先验证规范 content hash。准则 cache 不写入 Basic Memory knowledge 目录。
+
+Phase F 语义索引（semantic index）已实现：`turn-index.ts` 定义 TurnIndex schema（intent、actions/outcomes/decisions/constraints/failures/openQuestions 六类语义结论、keywords/entities/artifactRefs/sourceEvents），每项语义结论通过 `SemanticEntry`/`IndexSourceRef`（messageId、field、可选 toolCallId）引用原始 TurnBlock 消息/工具事件，保持可审计性；提供与 turn-block.ts/rule-cache.ts 相同模式的规范 XML 序列化（固定属性顺序、实体转义、SHA-256 content hash，hash 输入排除 content_hash 字段）与 `validateIndex()`（先结构校验后 hash 校验）。`ColdMemoryStore` 接口新增 `writeIndex` 与 `search` 契约及 `MemoryScope`/`SearchHit`/`SearchOptions` 类型；`FileColdStore` 实现幂等索引写入（同 hash 直接返回、不同 hash 报 Hash conflict、原子写入），索引存放在 `state/cold-store/<repo>/turn-index/<sessionId>/` 下（派生产物，绝不替代 turns/ 下的原始 TurnBlock），并实现确定性全文检索：查询分词后对各字段做不区分大小写的子串匹配计分，按 repository/taskId/sessionId 过滤范围、按 blockId 去重（同分取最小 sequence）、按分数降序/sequence 升序稳定排序、默认 limit 10，返回的 `blockRef` 始终指向 turns/ 下的原始块路径。新增便宜的 `memory-indexer` 角色（MiMo 2.5 Pro），只写 `.teamflow/runs/memory/` 或冷存储索引目录，禁止修改产品代码与 Basic Memory knowledge。Phase F 不实现 vector/hybrid search，仅提供确定性全文检索候选与块引用。
+
+Phase G 规划反馈（planning feedback）已实现：预算超限时 `phase_state.py` 的 `finish` 子命令生成结构化 phase BLOCKED 收据（block-reason=CONTEXT_BUDGET_EXCEEDED 或 RECALL_BUDGET_EXCEEDED，附 limit/used/remaining、protected_component、required_action=REPLAN_AND_SPLIT、largest_sources 与 source_refs），外层 planner 可仅凭 phase 元数据识别 budget failure 并发起显式重拆分；`start` 子命令支持 parent-run-id/parent-phase/split-scope lineage；新增 `planning-experience` 子命令仅在新拆分所有子 phase 验证 PASS 后生成 planning experience（记录 failure_mode、original_split、verified_new_split、evidence_receipt_refs、applicable_scope），任何失败、部分成功或未完成均 deferred 不写，绝不保存原始对话、密钥或临时错误。
 
 ## 模型配置
 
@@ -138,6 +177,7 @@ teamflow session list --format json         # 仅输出会话元数据（id/mode
 | `test-runner` | MiMo 2.5 Pro | 只执行测试并返回结构化错误回执；禁止修改文件 |
 | `coder` | Kimi K3 | 专注修改代码、构建和测试；禁止危险 Git 操作 |
 | `command` | MiMo 2.5 Pro | 快速执行明确的 Shell、Git、GitHub 操作；禁止修改代码和启动子 Agent |
+| `supervisor` | MiMo 2.5 Pro | 机械性校验（artifact 存在性、checksum、test-patch 门禁）；禁止编辑和委派 |
 
 记忆候选生成使用四个隔离阶段：`emotional-salience-sensor`（MiMo 2.5 Pro）探测可观察信号与记忆显著性，`memory-compressor`（DeepSeek V4 Pro）压缩原始长记忆，`memory-extractor`（GLM-5.2）发现概念与经验，`memory-formatter`（GLM-5.2）生成原子化候选。正式 formatter 固定使用 GLM-5.2，作为稳定输出骨架；其他模型只通过实验目录临时对比。Emotion 只提供注意力元数据，不进行心理诊断、不主动追问，也不能作为事实证据或直接写入记忆。
 
@@ -149,6 +189,8 @@ teamflow session list --format json         # 仅输出会话元数据（id/mode
 - 智谱 GLM Coding Plan：`https://open.bigmodel.cn/api/coding/paas/v4`
 
 底层由 Pi runtime 读取 `.teamflow/models.json` 和 Agent Markdown frontmatter，角色解析不依赖额外兼容配置。
+
+Agent frontmatter 支持的字段：`description`（必需）、`model`（必需，`<provider>/<model>`）、`tools`（可选，逗号分隔工具列表）、`delegates`（可选，严格布尔值 `true` 时授权 `task`/`task_group`）、`needs_project_rules`（可选，`false` 时跳过 AGENTS.md 注入，适用于纯执行角色如 `test-runner`、`command`）。
 
 明确的命令式任务不启动 GLM planner 与 K3 coder，直接使用快速命令模式：
 
@@ -163,6 +205,8 @@ Pi 以流式方式消费模型响应。明确的 provider timeout、认证失败
 记忆 Agent 默认同样无限等待 provider。只有显式设置正整数 `TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS` 才启用本地 wall-time；零、负数和非整数会被拒绝。若显式 timeout 或 provider 错误发生在 extraction 之后，使用 `teamflow memory-capture --receipt <file> --resume-formatting <run-id>`，不重跑已完成阶段；启用 timeout 时仍会终止整个子进程组，避免后台孤儿继续执行 apply。
 
 外层协调只观察元数据：用 `teamflow phase status --run-id <id>` 读取阶段收据，用 `teamflow session list --format json` 读取会话概要，并检查 `.teamflow/runs/` 下约定产物是否存在。它不读取会话文件、prompt、reasoning、response、原始错误或凭证，也不因终端静默自行终止内层运行。
+
+外层 loop 的这套监听契约固化为可安装 Skill `.teamflow/skills/observe-inner-loop/`，并在 `.teamflow/AGENTS.md` 的「Outer loop observation」章节声明。因为外层 loop 不干活，它必须以最低 token 成本准确探测内层执行路径：只测产物存在性与非空、不读产物正文；`RUNNING` + `stale: true` 仅表示观察时间超过 `TEAMFLOW_PHASE_TIMEOUT_SECONDS`，不是失败，`BLOCKED` 是唯一停止信号；轮询间隔至少 30 秒，状态未变化时保持静默、只报告 phase 与 status 的跃迁。
 
 单次任务默认最多自动创建 8 条新记忆；超出时 deterministic validation/apply 会在任何写入前整体拒绝。可通过 `TEAMFLOW_MEMORY_MAX_CREATES_PER_RUN` 显式调整，但不建议常态放宽。
 
@@ -225,7 +269,7 @@ teamflow server --dir ../try/mcap
 - 具有可见的加载、空结果与错误状态。
 - 页面为响应式布局，适配桌面与移动端浏览器。
 
-该页面严格只读：不提供任何编辑、创建或删除控件；记忆数据全部通过 `textContent` / `setAttribute` 安全渲染，不做原始 HTML 插值；实现为零 npm 运行时依赖（仅 Bun 内置与浏览器标准 API）。
+该页面严格只读：不提供任何编辑、创建或删除控件；记忆数据全部通过 `textContent` / `setAttribute` 安全渲染，不做原始 HTML 插值；服务路径仅依赖 Bun 内置与预构建静态资源（构建期依赖仅在 teamflow 仓库内需要）。
 
 服务不提供任何写入、编辑或删除端点；非 GET 请求一律返回 405。
 
@@ -263,7 +307,63 @@ teamflow memory-capture --receipt .teamflow/runs/task-receipts/<run-id>/receipt.
 
 `test-writer` 采用产物优先的检查点：完成一次聚焦代码检查和一次代表性测试惯例检查后，先写 `tests.patch`，再继续校验和精炼。Planner 会在委派返回后独立检查该补丁；`finish=length` 或缺少强制产物会将当前 phase 明确结束为 `BLOCKED`，不会把空返回当成功或在同一 phase 内静默重试。
 
-`teamflow server` 的实现是 Bun + TypeScript，源码位于仓库根目录 `server/`（"实现集中在 `.teamflow/`" 原则的唯一文档化例外）；`scripts/init-project.sh` 会把它安装到目标项目的 `.teamflow/server/` 下。服务使用 `Bun.serve`，运行时只依赖 Bun 内置与标准 API（零 npm 运行时依赖），并通过 `--local` 调用本机已有的 `basic-memory` CLI 读取记忆；不使用 MCP、云同步、账号或密钥。开发期类型检查：`cd server && bun install && bun run typecheck`。
+`teamflow server` 的实现是 Bun + TypeScript，源码位于仓库根目录 `server/`（"实现集中在 `.teamflow/`" 原则的唯一文档化例外）。它读取的是跨项目共享记忆库，不是项目数据，因此**不按项目安装**：`bootstrap.sh` 与 `install.sh` 只把它同步到全局 `~/.teamflow/server/` 一份，业务项目只收到瘦包装 `.teamflow/bin/server`。包装器按 `TEAMFLOW_SERVER_DIR` → `$TEAMFLOW_HOME/server` → `<repo>/server` 顺序定位源码，找不到时给出明确诊断而非静默失败。
+
+服务使用 `Bun.serve`，运行时只依赖 Bun 内置与标准 API（服务路径无 npm 运行时依赖，构建期依赖仅在仓库内），并通过 `--local` 调用本机已有的 `basic-memory` CLI 读取记忆；不使用 MCP、云同步、账号或密钥。
+
+后端按职责拆分为模块，`server.ts` 只做装配（详见 `docs/teamflow-web-console-design.md`）：
+
+```text
+server/src/
+├── server.ts              # 装配路由（51 行）
+├── config.ts              # CLI/env 解析
+├── http/{router,response}.ts
+├── memory/
+│   ├── basic-memory.ts    # CLI 封装
+│   ├── scope.ts           # --dir 仓库 slug 过滤
+│   └── routes.ts          # /api/memories、/api/memory
+├── opencode/
+│   ├── config.ts          # 上游 URL 与凭证解析
+│   ├── types.ts           # Session/Message/Part（与前端共享）
+│   └── proxy.ts           # /api/oc/* 反向代理（SSE 透传）
+└── web/                   # Svelte 前端（Vite 构建到 web/dist/，由服务静态托管）
+```
+
+`server/shared/` 存放前后端共享的 API 响应类型（纯 TypeScript、零依赖），后端 `src/` 与前端 `web/` 都从这里导入。
+
+Phase C.1 起 `server/` 合并为**单一 Bun 上下文**：只有一个 `server/package.json`、一次 `bun install` 装好后端与前端全部开发依赖；`server/web/` 不再有自己的 manifest 与 lockfile。服务路径本身仍无构建步骤——`bin/server` 直接用 Bun 跑 TypeScript 源码；`bun run build` 只产出前端静态产物 `web/dist/`。
+
+### 集成 opencode 会话
+
+`opencode` 是外层 loop，跟随持久化任务会话、自己管自己的生命周期；teamflow 只**连接**已运行的实例，不拉起也不停止它。
+
+```bash
+# 先启动 opencode（凭证必须显式指定，否则它每次随机生成）
+OPENCODE_SERVER_USERNAME=tf OPENCODE_SERVER_PASSWORD=<secret> \
+  opencode serve --port 7396
+
+# 再启动 teamflow server，指向它
+TEAMFLOW_OPENCODE_URL=http://127.0.0.1:7396 \
+TEAMFLOW_OPENCODE_USERNAME=tf \
+TEAMFLOW_OPENCODE_PASSWORD=<secret> \
+  teamflow server
+```
+
+也可用 `--opencode-url` / `--opencode-user` / `--opencode-password`，优先级高于环境变量。
+
+`/api/oc/*` 是**服务端反向代理**：浏览器只面对 teamflow 一个源，opencode 的 Basic Auth 凭证留在服务端进程内，绝不下发到浏览器（响应头与响应体均已由测试断言无凭证）。SSE（`/api/oc/event`）流式透传、不缓冲，客户端断开时关闭上游连接。
+
+未配置 opencode 时服务照常启动，仅 `/api/oc/*` 返回结构化 503（含 `reason` 与 `detail`），记忆浏览不受影响。
+
+前端是 `server/web/` 下的 Svelte 应用，经 Vite 构建后由 Bun 服务静态托管：
+
+```bash
+cd server && bun install   # 一次安装全部依赖（单一 package.json）
+bun run dev                # Bun 服务在 7324
+bun run build              # Vite 构建前端到 web/dist/
+bun run typecheck          # tsc --noEmit + svelte-check
+bun test                   # server 全部测试（纯 Bun，无 Python）
+```
 
 可配置项：
 
@@ -272,8 +372,54 @@ teamflow memory-capture --receipt .teamflow/runs/task-receipts/<run-id>/receipt.
 - `TEAMFLOW_MEMORY_HOME`：默认 `$TEAMFLOW_HOME/memory`
 - `TEAMFLOW_MEMORY_PROJECT`：默认 `teamflow`
 - `TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS`：默认不设置，即不启用本地 wall-time。
+- `TEAMFLOW_OPENCODE_URL` / `TEAMFLOW_OPENCODE_USERNAME` / `TEAMFLOW_OPENCODE_PASSWORD`：默认不设置，即 `/api/oc/*` 返回 503，记忆浏览不受影响。
 
 记忆策略：先搜索、后验证，只在全部质量门 PASS 后写入；禁止保存密钥、隐私数据、原始对话、完整日志或未验证猜测。
+
+## 运行时产物与清理
+
+`.teamflow/` 只承载 Pi agent 运行时内容（`agents/`、`skills/`、`extensions/`、`bin/`）。`.teamflow/` 不是 npm 项目——扩展依赖由 Pi 全局安装解析，无需 `package.json` 或 `node_modules`。以下都不进 Git，也不会被安装：
+
+```text
+.teamflow/runs/            # 阶段收据、测试补丁、记忆管道产物、截图
+.teamflow/sessions/        # 会话记录
+.teamflow/auth.json        # 凭证
+.teamflow/models-store.json
+.teamflow/.env
+.teamflow/tests/           # 运行时自身测试（追踪但不安装）
+```
+
+其他 AI harness 的配置在 `.teamflow/.gitignore` 中忽略（`openai.yaml`、`CLAUDE.md`、`.codex/`、`.cursor/`、`.windsurf/`），因此另一个工具可以在该目录下放自己的配置，而不会变成被 `install.sh` 复制到业务项目的受管文件。
+
+清理一次性原始输出：
+
+```bash
+python3 scripts/clean.py --dry-run    # 预览
+python3 scripts/clean.py              # 执行
+```
+
+只删除 `.teamflow/runs/` 下的 `.ndjson`、`.log`、截图（`.png`/`.jpg`/`.jpeg`/`.gif`/`.webp`）与 `server-scope-adapter` 临时目录；task-receipts、test-patches 和记忆管道的阶段 JSON 属于证据，始终保留。
+
+## 测试布局
+
+测试跟随被测代码所在位置，分三层：
+
+```text
+tests/             # 测 scripts/：install、uninstall、wrapper 装配、命名空间与清理守卫
+.teamflow/tests/   # 测可安装运行时：agents、extensions、skills、bin
+server/tests/      # 测 Bun HTTP 记忆浏览服务
+```
+
+运行：
+
+```bash
+python -m pytest tests .teamflow/tests   # 全部 Python 测试
+python -m pytest .teamflow/tests         # 只测运行时
+cd server && bun test                    # server 全部测试（Bun，无 Python）
+cd server && bun run typecheck           # server 类型检查
+```
+
+`.teamflow/tests/` 与 `server/tests/` 都**不会**被安装到业务项目：前者不在 `install.sh` 的 `FILES` 白名单也不在其 `find` 路径中；后者更彻底——`server/` 整体不参与安装，因此其测试根本没有泄漏路径。`tests/test_test_layout.py` 固化这两条约束，并校验搬移后的模块仍以正确深度解析仓库根。
 
 ## 维护与诊断
 
@@ -290,7 +436,7 @@ teamflow debug skill
 更新 Basic Memory 官方 Skills 的 CLI-only 适配：
 
 ```bash
-./scripts/update-basic-memory-skills.sh \
+./scripts/update.sh \
   --ref main \
   --instruction "保留新增的本地知识图谱能力，继续禁止云端与 MCP"
 ```
@@ -307,14 +453,22 @@ teamflow debug skill
 │   ├── AGENTS.md
 │   ├── agents/
 │   ├── skills/
-│   └── bin/
-├── server/                # Bun + TypeScript 只读记忆浏览服务源码（仓库级例外）
+│   ├── bin/
+│   └── tests/             # 运行时自身测试（不安装）
+├── server/                # Bun + TypeScript 只读记忆浏览服务源码（仓库级例外，不安装）
+│   ├── src/               # 后端模块（路由、CLI 封装、opencode 代理、静态托管）
+│   ├── shared/            # 前后端共享 API 类型（纯 TypeScript）
+│   ├── web/               # Svelte 前端（Vite 构建到 web/dist/）
+│   └── tests/             # server 自身测试（bun test）
+├── tests/                 # scripts/ 的测试
 └── scripts/
-    ├── bootstrap.sh
-    ├── doctor.sh
-    ├── init-project.sh
-    ├── setup-memory.sh
-    ├── update-basic-memory-skills.sh
+    ├── bootstrap.sh       # 安装运行时与全局入口
+    ├── doctor.sh          # 环境与安装诊断
+    ├── install.sh         # 安装 .teamflow/ 到业务项目
+    ├── uninstall.sh       # 清理全局命令、项目运行时与（可选）记忆数据
+    ├── setup.sh           # 初始化本地跨项目记忆
+    ├── update.sh          # 刷新 Basic Memory 官方 Skills 的 CLI-only 适配
+    ├── clean.py           # 清理 .teamflow/runs/ 下的一次性原始输出
     └── teamflow           # 全局入口模板
 ```
 
