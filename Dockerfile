@@ -1,6 +1,7 @@
 # Multi-stage image for the Teamflow OpenCode web runtime.
-# Final command: node scripts/opencode_health_gateway.js
-# (gateway binds 0.0.0.0:${PORT:-3000} and spawns opencode web on loopback)
+# Final command: node /opt/teamflow-runtime/scripts/opencode_health_gateway.js
+# (gateway binds 0.0.0.0:${PORT:-3000} and spawns opencode web on loopback
+#  with cwd=/workspace/teamflow)
 
 FROM node:22-slim AS builder
 
@@ -22,6 +23,12 @@ RUN npm install --global opencode-ai@1.18.4 @earendil-works/pi-coding-agent
 
 FROM node:22-slim AS runtime
 
+# Configurable repository checkout (public repo, no credentials needed).
+# CI should override TEAMFLOW_REPO_REF with the exact commit SHA via
+# --build-arg for reproducible, up-to-date checkouts.
+ARG TEAMFLOW_REPO_URL=https://github.com/one2x-ai/teamflow.git
+ARG TEAMFLOW_REPO_REF=0e4c0cfd
+
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        git curl python3 ca-certificates \
@@ -38,11 +45,23 @@ RUN groupadd --system --gid 1001 opencode \
 
 ENV PATH="/opt/uv-tools/bin:${PATH}"
 
-WORKDIR /app
-COPY --chown=opencode:opencode . .
+# Clone the public repository to /workspace/teamflow at a pinned revision.
+# The repo is public (visibility: public), so no authenticated BuildKit
+# secret is required. The clone creates a non-bare checkout with a valid
+# .git directory and full file tree.
+RUN mkdir -p /workspace \
+    && git clone --no-checkout "${TEAMFLOW_REPO_URL}" /workspace/teamflow \
+    && git -C /workspace/teamflow checkout "${TEAMFLOW_REPO_REF}" \
+    && chown -R opencode:opencode /workspace
 
+# Gateway and runtime launcher at an immutable path outside the workspace,
+# so container startup never depends on the clone source.
+RUN mkdir -p /opt/teamflow-runtime/scripts
+COPY --chown=opencode:opencode scripts/opencode_health_gateway.js /opt/teamflow-runtime/scripts/
+
+WORKDIR /workspace/teamflow
 EXPOSE 3000
 
 USER opencode
 
-CMD ["node", "scripts/opencode_health_gateway.js"]
+CMD ["node", "/opt/teamflow-runtime/scripts/opencode_health_gateway.js"]

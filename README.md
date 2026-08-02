@@ -487,9 +487,9 @@ teamflow debug skill
 
 ## 容器运行（Docker）
 
-仓库根目录提供多阶段 `Dockerfile`：构建阶段安装 `opencode-ai`、`@earendil-works/pi-coding-agent` 与 `basic-memory`（经 `uv tool install`），运行阶段以非 root 用户 `opencode` 在 `WORKDIR /app`（包含 `.teamflow/` 运行时）下启动 Web UI。
+仓库根目录提供多阶段 `Dockerfile`：构建阶段安装 `opencode-ai`、`@earendil-works/pi-coding-agent` 与 `basic-memory`（经 `uv tool install`），运行阶段以非 root 用户 `opencode` 在 `WORKDIR /workspace/teamflow`（镜像构建时检出的 Git 工作树，包含 `.teamflow/` 运行时）下启动 Web UI。
 
-- 启动命令：`node scripts/opencode_health_gateway.js`。容器以无第三方依赖的 Node 健康网关占据公开端口 `0.0.0.0:${PORT:-3000}`，由网关在回环地址上拉起 `opencode web` 并代理全部流量（含 WebSocket 升级）；健康探针（`kube-probe/` 或 `ELB-HealthChecker/` UA 访问 `GET`/`HEAD /`）由网关直接返回合成的最小化 HTTP 200（`text/plain`，正文 `ok`），既不转发给上游也不注入任何凭证，其余流量照常代理。
+- 启动命令：`node /opt/teamflow-runtime/scripts/opencode_health_gateway.js`。容器以无第三方依赖的 Node 健康网关占据公开端口 `0.0.0.0:${PORT:-3000}`，由网关在回环地址上拉起 `opencode web` 并代理全部流量（含 WebSocket 升级）；健康探针（`kube-probe/` 或 `ELB-HealthChecker/` UA 访问 `GET`/`HEAD /`）由网关直接返回合成的最小化 HTTP 200（`text/plain`，正文 `ok`），既不转发给上游也不注入任何凭证，其余流量照常代理。
 - 容器端口：`3000`，可用环境变量 `PORT` 覆盖（需同步调整 `-p` 映射）。
 - 绑定地址：`0.0.0.0`，供宿主机或反向代理访问。
 - 凭据：模型与运行时密钥一律在 `docker run` 时通过环境变量注入；镜像不含任何凭据或 `.env` 内容，也不要把真实密钥写入命令历史或文档。
@@ -505,3 +505,9 @@ docker run -e OPENCODE_SERVER_USERNAME=$OPENCODE_SERVER_USERNAME -e OPENCODE_SER
 # 推荐：用 --env-file 避免密钥进入 shell 历史
 # docker run --env-file .env -p 3000:3000 teamflow-opencode-web
 ```
+
+### 工作区路径与 Git 检出
+
+容器内 OpenCode 的工作目录是 `/workspace/teamflow`，这是镜像构建时从公开仓库 `https://github.com/one2x-ai/teamflow.git` 检出的完整 Git 工作树（非 bare）。检出源和版本通过 Dockerfile 的 `ARG TEAMFLOW_REPO_URL`（默认公开仓库）和 `ARG TEAMFLOW_REPO_REF`（默认固定 commit）控制，构建时可覆盖。仓库为公开（visibility: public），无需认证凭据。
+
+由于未使用 PVC 持久卷（无持久存储），Pod 替换（重启）会丢失 `/workspace/teamflow` 中所有未提交的编辑。

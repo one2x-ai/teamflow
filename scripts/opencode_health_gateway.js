@@ -55,7 +55,7 @@ const INTERNAL_PORT = 13000;
 const child = spawn(
   'opencode',
   ['web', '--hostname', '127.0.0.1', '--port', String(INTERNAL_PORT)],
-  { stdio: 'inherit' }
+  { stdio: 'inherit', cwd: '/workspace/teamflow' }
 );
 
 function isHealthProbe(req) {

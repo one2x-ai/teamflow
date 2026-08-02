@@ -653,6 +653,39 @@ class ChildLifecycleTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# A3b -- Child process cwd is /workspace/teamflow
+# ---------------------------------------------------------------------------
+
+
+class ChildCwdTests(unittest.TestCase):
+    """A3b: spawn options include cwd set to /workspace/teamflow."""
+
+    def setUp(self):
+        self.source = _require_gateway_source()
+
+    def test_spawn_options_include_cwd(self):
+        self.assertIn(
+            "cwd",
+            self.source,
+            "gateway spawn options must include a 'cwd' property",
+        )
+
+    def test_cwd_value_is_workspace_teamflow(self):
+        self.assertIn(
+            "/workspace/teamflow",
+            self.source,
+            "gateway must set cwd to /workspace/teamflow",
+        )
+
+    def test_cwd_is_property_key_in_spawn_options(self):
+        self.assertTrue(
+            re.search(r'cwd\s*[:=]', self.source),
+            "'cwd' must appear as a property key in the spawn() options "
+            "object (e.g. cwd: '/workspace/teamflow')",
+        )
+
+
+# ---------------------------------------------------------------------------
 # A4 live -- Fail-closed without credentials
 # ---------------------------------------------------------------------------
 

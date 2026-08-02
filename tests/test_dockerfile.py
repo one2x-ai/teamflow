@@ -335,19 +335,16 @@ class RequiredRuntimeFilesTests(unittest.TestCase):
         self.assertTrue(final_wd, "final WORKDIR must not be empty")
 
     def test_copies_repository_into_image(self):
-        lines = _logical_lines(self.text)
-        copy_found = False
-        for line in lines:
-            if not line.upper().startswith("COPY"):
-                continue
-            parts = line.split()
-            args = [p for p in parts[1:] if not p.startswith("--")]
-            if args and args[0] == ".":
-                copy_found = True
-                break
-        self.assertTrue(
-            copy_found,
-            "Dockerfile must COPY the repository (source '.') into the image",
+        self.assertRegex(
+            self.text,
+            r'git\s+clone',
+            "Dockerfile must clone the repository via 'git clone' instead "
+            "of COPY . .",
+        )
+        self.assertIn(
+            "/workspace/teamflow",
+            self.text,
+            "Dockerfile must clone the repository to /workspace/teamflow",
         )
 
     def test_installs_opencode_cli(self):
@@ -887,6 +884,294 @@ class LiveAuthContractTests(unittest.TestCase):
             f"Basic Auth GET / did not return 200 after {HTTP_RETRIES} "
             f"retries: {last_error}"
         )
+
+
+# ---------------------------------------------------------------------------
+# AC 11 — Workspace git checkout contract
+# ---------------------------------------------------------------------------
+
+
+class WorkspaceGitCheckoutTests(unittest.TestCase):
+    """The image contains a valid Git checkout at /workspace/teamflow."""
+
+    def setUp(self):
+        self.text = _require_dockerfile_text()
+
+    def test_dockerfile_references_workspace_teamflow(self):
+        self.assertIn(
+            "/workspace/teamflow",
+            self.text,
+            "Dockerfile must reference the path /workspace/teamflow",
+        )
+
+    def test_dockerfile_contains_git_clone(self):
+        self.assertRegex(
+            self.text,
+            r'git\s+clone',
+            "Dockerfile must contain a 'git clone' instruction",
+        )
+
+    def test_final_workdir_is_workspace_teamflow(self):
+        workdirs = re.findall(r"(?im)^\s*WORKDIR\s+(\S+)", self.text)
+        self.assertTrue(workdirs, "Dockerfile must set WORKDIR")
+        final_wd = workdirs[-1].strip('"').strip("'")
+        self.assertEqual(
+            final_wd,
+            "/workspace/teamflow",
+            "final WORKDIR must resolve to /workspace/teamflow, "
+            f"got '{final_wd}'",
+        )
+
+    def test_final_workdir_is_not_app(self):
+        workdirs = re.findall(r"(?im)^\s*WORKDIR\s+(\S+)", self.text)
+        self.assertTrue(workdirs, "Dockerfile must set WORKDIR")
+        final_wd = workdirs[-1].strip('"').strip("'")
+        self.assertNotEqual(
+            final_wd,
+            "/app",
+            "final WORKDIR must not be /app (old COPY pattern replaced)",
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC 12 — Deterministic git checkout source and revision
+# ---------------------------------------------------------------------------
+
+
+class DeterministicCheckoutTests(unittest.TestCase):
+    """Source and revision are observable and deterministic."""
+
+    def setUp(self):
+        self.text = _require_dockerfile_text()
+
+    def test_teamflow_repo_url_arg_with_github_default(self):
+        m = re.search(
+            r"(?im)^\s*ARG\s+TEAMFLOW_REPO_URL\s*=\s*(\S+)",
+            self.text,
+        )
+        self.assertIsNotNone(
+            m,
+            "Dockerfile must declare ARG TEAMFLOW_REPO_URL with a default",
+        )
+        self.assertIn(
+            "github.com",
+            m.group(1),
+            "TEAMFLOW_REPO_URL default must reference github.com "
+            "(public repo, no credentials)",
+        )
+
+    def test_teamflow_repo_ref_arg_exists(self):
+        self.assertRegex(
+            self.text,
+            r"(?im)^\s*ARG\s+TEAMFLOW_REPO_REF\b",
+            "Dockerfile must declare ARG TEAMFLOW_REPO_REF",
+        )
+
+    def test_teamflow_repo_ref_default_is_commit_hash(self):
+        m = re.search(
+            r"(?im)^\s*ARG\s+TEAMFLOW_REPO_REF\s*=\s*(\S+)",
+            self.text,
+        )
+        self.assertIsNotNone(
+            m,
+            "Dockerfile must declare ARG TEAMFLOW_REPO_REF with a default",
+        )
+        default_val = m.group(1).strip().strip('"').strip("'")
+        rejected = {"main", "master", "develop", "head"}
+        self.assertNotIn(
+            default_val.lower(),
+            rejected,
+            "TEAMFLOW_REPO_REF default must not be a bare branch name "
+            f"(got '{default_val}')",
+        )
+        self.assertRegex(
+            default_val,
+            r"^[0-9a-f]{7,40}$",
+            "TEAMFLOW_REPO_REF default must be a pinned commit hash "
+            f"(7-40 hex chars, got '{default_val}')",
+        )
+
+    def test_no_literal_github_credentials(self):
+        self.assertNotRegex(
+            self.text,
+            r"ghp_",
+            "Dockerfile must not contain GitHub PAT tokens (ghp_)",
+        )
+        self.assertNotRegex(
+            self.text,
+            r"token=",
+            "Dockerfile must not contain token= credential patterns",
+        )
+        self.assertNotRegex(
+            self.text,
+            r"password=",
+            "Dockerfile must not contain password= credential patterns",
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC 13 — Workspace ownership for the non-root user
+# ---------------------------------------------------------------------------
+
+
+class WorkspaceOwnershipTests(unittest.TestCase):
+    """Checkout is owned by the non-root user."""
+
+    def setUp(self):
+        self.text = _require_dockerfile_text()
+
+    def test_chown_applied_to_workspace(self):
+        chown_lines = [
+            line for line in self.text.splitlines()
+            if re.search(r"chown", line, re.IGNORECASE)
+        ]
+        found = any(
+            "opencode" in line and "/workspace" in line
+            for line in chown_lines
+        )
+        self.assertTrue(
+            found,
+            "Dockerfile must chown /workspace to opencode (non-root user "
+            "must own the checkout)",
+        )
+
+    def test_useradd_uid_1001(self):
+        self.assertRegex(
+            self.text,
+            r"useradd.*--uid\s+1001",
+            "useradd must specify --uid 1001",
+        )
+
+    def test_groupadd_gid_1001(self):
+        self.assertRegex(
+            self.text,
+            r"groupadd.*--gid\s+1001",
+            "groupadd must specify --gid 1001",
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC 14 — Gateway launcher at an immutable path outside the workspace
+# ---------------------------------------------------------------------------
+
+
+class RuntimeLauncherLocationTests(unittest.TestCase):
+    """Gateway launcher is at an immutable path outside the workspace."""
+
+    def setUp(self):
+        self.text = _require_dockerfile_text()
+
+    def test_gateway_copied_outside_workspace(self):
+        copy_lines = [
+            line for line in _logical_lines(self.text)
+            if line.upper().startswith("COPY")
+        ]
+        gateway_copies = [
+            line for line in copy_lines
+            if GATEWAY_SCRIPT_NAME in line
+        ]
+        self.assertTrue(
+            gateway_copies,
+            "Dockerfile must COPY the gateway script "
+            f"({GATEWAY_SCRIPT_NAME}) to a path outside /workspace/teamflow",
+        )
+        for line in gateway_copies:
+            parts = [p for p in line.split() if not p.startswith("--")]
+            dest = parts[-1].strip('"').strip("'") if len(parts) > 2 else ""
+            self.assertFalse(
+                dest.startswith("/workspace/teamflow"),
+                "Gateway script must NOT be copied under /workspace/teamflow "
+                f"(destination '{dest}' in: {line})",
+            )
+
+    def test_cmd_references_absolute_gateway_path(self):
+        cmd = _final_command(self.text)
+        self.assertIn(
+            GATEWAY_SCRIPT_NAME,
+            cmd,
+            "CMD must reference the gateway script",
+        )
+        path_match = re.search(
+            r"(/[\S]*" + re.escape(GATEWAY_SCRIPT_NAME) + r")",
+            cmd,
+        )
+        self.assertIsNotNone(
+            path_match,
+            "CMD must reference an absolute path (starting with /) to "
+            f"{GATEWAY_SCRIPT_NAME}, not a relative path",
+        )
+
+    def test_cmd_does_not_use_relative_gateway_path(self):
+        cmd = _final_command(self.text)
+        self.assertNotRegex(
+            cmd,
+            r"(?!\w)scripts/" + re.escape(GATEWAY_SCRIPT_NAME),
+            "CMD must not reference scripts/opencode_health_gateway.js as a "
+            "relative path; use an absolute path like "
+            "/opt/teamflow-runtime/scripts/opencode_health_gateway.js",
+        )
+
+
+# ---------------------------------------------------------------------------
+# AC 15 — README documents the workspace contract
+# ---------------------------------------------------------------------------
+
+
+class WorkspaceReadmeDocTests(unittest.TestCase):
+    """README documents the workspace contract."""
+
+    def setUp(self):
+        readme = ROOT / "README.md"
+        if not readme.exists():
+            raise AssertionError(f"README.md not found at {readme}")
+        self.text = readme.read_text(encoding="utf-8")
+
+    def test_readme_references_workspace_teamflow(self):
+        self.assertIn(
+            "/workspace/teamflow",
+            self.text,
+            "README must document the /workspace/teamflow checkout path",
+        )
+
+    def test_readme_documents_no_pvc_persistence(self):
+        lower = self.text.lower()
+        has_pvc_term = any(
+            term in lower for term in ("pvc", "持久卷", "persistent")
+        )
+        has_no_term = any(
+            term in lower for term in ("no ", "without", "不", "无")
+        )
+        self.assertTrue(
+            has_pvc_term,
+            "README must mention PVC persistence absence "
+            "(look for 'PVC', '持久卷', or 'persistent')",
+        )
+        self.assertTrue(
+            has_no_term,
+            "README must state there is no PVC persistence "
+            "(look for 'no ', 'without', '不', or '无' near the PVC mention)",
+        )
+
+    def test_readme_documents_pod_replacement_discards_edits(self):
+        lower = self.text.lower()
+        has_pod_term = any(
+            term in lower for term in ("pod", "replacement", "重启", "替换")
+        )
+        has_discard_term = any(
+            term in lower
+            for term in ("discard", "丢失", "uncommitted", "未提交")
+        )
+        self.assertTrue(
+            has_pod_term,
+            "README must mention Pod replacement "
+            "(look for 'Pod', 'pod', 'replacement', '重启', or '替换')",
+        )
+        self.assertTrue(
+            has_discard_term,
+            "README must mention that Pod replacement discards uncommitted "
+            "edits (look for 'discard', '丢失', 'uncommitted', or '未提交')",
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
