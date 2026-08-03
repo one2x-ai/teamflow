@@ -55,7 +55,8 @@ export function parseArgs(argv: string[]): ParsedArgs {
 }
 
 export function resolveMemoryConfig(env: NodeJS.ProcessEnv): MemoryConfig {
-  const root = env.TEAMFLOW_MEMORY_HOME ?? `${env.HOME}/.teamflow/memory`;
+  const home = env.TEAMFLOW_HOME ?? `${env.HOME}/.teamflow`;
+  const root = env.TEAMFLOW_MEMORY_HOME ?? `${home}/memory`;
   return {
     root,
     configDir: `${root}/state`,
