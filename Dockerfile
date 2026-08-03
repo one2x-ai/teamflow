@@ -30,7 +30,7 @@ ARG TEAMFLOW_REPO_REF=main
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
-       git curl python3 ca-certificates \
+       git curl python3 ca-certificates build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
@@ -41,10 +41,12 @@ COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 
 # Pinned Rust toolchain: copy the cargo + rustup trees from the official
-# slim image (no apt-get cargo, no extra C toolchain). The rustup shims in
-# /usr/local/cargo/bin resolve the real toolchain via RUSTUP_HOME.
-COPY --from=rust:1.89.0-slim /usr/local/cargo /usr/local/cargo
-COPY --from=rust:1.89.0-slim /usr/local/rustup /usr/local/rustup
+# rust:1.97.1-slim-bookworm image (bookworm matches the node:22-slim glibc).
+# The rustup shims in /usr/local/cargo/bin resolve the real toolchain via
+# RUSTUP_HOME; the runtime stage's build-essential provides cc/gcc/make so
+# binary crates can link.
+COPY --from=rust:1.97.1-slim-bookworm /usr/local/cargo /usr/local/cargo
+COPY --from=rust:1.97.1-slim-bookworm /usr/local/rustup /usr/local/rustup
 
 RUN groupadd --system --gid 1001 opencode \
     && useradd --system --uid 1001 --gid opencode --create-home opencode

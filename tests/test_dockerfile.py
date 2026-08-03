@@ -488,6 +488,47 @@ class RustToolchainTests(unittest.TestCase):
             "final runtime stage must set ENV RUSTUP_HOME=/usr/local/rustup",
         )
 
+    def test_rust_source_version_at_least_1_94(self):
+        """Rust COPY source is at least 1.94.0 (version floor, future-proof)."""
+        m = re.search(
+            r"COPY\s+--from=rust:(\d+)\.(\d+)\.(\d+)-slim-bookworm",
+            self.final_stage,
+        )
+        self.assertIsNotNone(
+            m,
+            "final runtime stage must COPY from rust:<semver>-slim-bookworm",
+        )
+        major, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3))
+        self.assertGreaterEqual(
+            (major, minor),
+            (1, 94),
+            f"Rust source version {major}.{minor}.{patch} must be >= 1.94.0",
+        )
+
+    def test_runtime_stage_installs_build_essential(self):
+        """Runtime stage apt-get installs build-essential (C linker)."""
+        joined = _join_continuations(self.final_stage)
+        blocks = re.findall(r"apt-get\s+install\b(.*?)&&", joined)
+        self.assertTrue(
+            blocks,
+            "runtime stage must contain an apt-get install command",
+        )
+        found = any("build-essential" in block.split() for block in blocks)
+        self.assertTrue(
+            found,
+            "runtime (final) stage apt-get install set must include "
+            "build-essential (C linker required by the Rust toolchain)",
+        )
+
+    def test_rust_source_uses_bookworm_variant(self):
+        """COPY source uses -slim-bookworm for glibc/bookworm compatibility."""
+        self.assertRegex(
+            self.final_stage,
+            r"COPY\s+--from=rust:\d+\.\d+\.\d+-slim-bookworm\b",
+            "Rust source must use the -slim-bookworm variant to match the "
+            "runtime glibc/bookworm base",
+        )
+
 
 # ---------------------------------------------------------------------------
 # AC 6 — .dockerignore secret / build-context exclusion
