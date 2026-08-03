@@ -1,8 +1,10 @@
 # Teamflow 记忆遗忘机制设计
 
-状态：设计稿 v2（未实现；实现须按 AGENTS.md 走 teamflow 多 Agent 流程）
+状态：设计稿 v3（未实现；实现须按 AGENTS.md 走 teamflow 多 Agent 流程）
 
-v2 修订依据：2026-08-03 三路评审结论 GO WITH REVISIONS——GLM-5.2 planner（session 019fc94c-bd05-72c0-b809-f3ee162ee5ac）、K3（session 019fc94e-d479-7911-89d8-17bd3c8a0120）、以及用户对当前仓库与 Basic Memory 0.22.1 源码的人工复核。主要修订：F1 更正为误报；新增 §4 前置契约（稳定身份、durable evidence、遗留权限、事件分类、账本契约、事务恢复、归档契约）；实施阶段重排为 Phase -1 起步、只读 audit 为最窄首切片、冷存储保留明确阻塞。
+v2 修订依据：2026-08-03 三路评审结论 GO WITH REVISIONS——GLM-5.2 planner（session 019fc94c-bd05-72c0-b809-f3ee162ee5ac）、K3（session 019fc94e-d479-7911-89d8-17bd3c8a0120）、以及用户对当前仓库与 Basic Memory 0.22.1 源码的人工复核。主要修订：F1 更正为误报；新增 §4 前置契约；实施阶段重排为 Phase -1 起步、只读 audit 为最窄首切片、冷存储保留明确阻塞。
+
+v3 修订依据：对 v2（commit b701c36）的独立只读复审（G1–G8）。主要修订：G1——slug 三处实现并非字节等价且漏列真正写笔记的 Python 实现，§4.2 改为冻结单一 slug 契约 + 跨实现金标测试；G2——消除"create 不变"与 journaled commit 的内部矛盾，create 改为 journal 内带 commit 标记的步骤；G3——新增 §4.8 笔记形状统一契约（手工 `teamflow-finding` 路径的原子保护盲区、authority 识别、memory_id 落地）；G4——显式声明存量库 bootstrapping 限制与解锁门槛；G5——Phase 0B 解析手工笔记 `[recorded]` 行回填而非降级；G6——`context` timeframe 变更单列为 Phase 2 带测试交付物；G7——补充账本 seq 计数器的崩溃持久化规则；G8——写侧改为直接输出规范下划线类型串，消除对外部归一化的依赖。
 
 适用范围：`~/.teamflow/memory/` 下的策展知识层（Basic Memory notes）、文件级冷存储（TurnBlock / TurnIndex）、规划经验，以及未来的云端记忆后端。
 
@@ -32,7 +34,7 @@ Teamflow 已发布到云上运行，但跨项目记忆仍存储在本地 `~/.tea
                 if re.search(r"(?m)^type:\s*(?:teamflow|workflow)_memory\s*$", head):
 ```
 
-处理：**无需存量迁移**。只增加一个 round-trip 兼容测试（以连字符写入 → 读回 frontmatter 为下划线 → 检测正则命中），防御未来 Basic Memory 归一化行为漂移。
+处理：**无需存量迁移**。残余风险（复审 G8）：免责依赖仓库外、未被测试固定的归一化不变式，一旦 Basic Memory 变更 `to_snake_case` 行为，原子源检测将静默失配。因此 Phase 0B 做两件事：写侧改为直接传入规范下划线串 `--type teamflow_memory`（归一化从此是无操作，写入串与检测正则固定在同一契约内）；同时保留 round-trip 兼容测试（连字符写入 → 读回下划线 → 正则命中）覆盖存量与第三方写入路径。
 
 ### F2 — 持久化笔记的证据与谱系是运行期悬空引用（确认，且比初判更严重）
 
@@ -52,11 +54,13 @@ apply 写入的笔记正文中，`[evidence]` 是 capsule 内部 ID（`NOTE-1` /
 
 ### F3 — deferred 队列有去无回（确认）
 
-`apply_candidates` 对 `update` / `supersede` 的处理是记录后放弃（`run_pipeline.py` 第 272 行起）；`50-apply.json` 虽被 `clean.py` 当作证据保留，但没有任何命令、Agent 或 Skill 消费它。被更强证据取代或已被证伪的记忆永远以 `active` 姿态参与召回。
+`apply_candidates` 对 `update` / `supersede` 的处理是记录后放弃（`run_pipeline.py` 第 272 行起）；没有任何命令、Agent 或 Skill 消费 `50-apply.json`（措辞更正：`clean.py` 是按后缀泛化保留所有 `.json`，并非专门保留该文件——它幸存是巧合而非契约）。被更强证据取代或已被证伪的记忆永远以 `active` 姿态参与召回。
 
-### F4 — 缺少任何生命周期元数据（确认）
+### F4 — 缺少任何生命周期元数据（确认，范围限定为自动 curated 笔记）
 
-策展笔记的 frontmatter 只有 title/type/permalink/tags；正文只有 type/status/scope/evidence/lineage 五行观察。没有稳定身份标识、`recorded_at`、`last_verified_at`、召回命中记录、强化/矛盾计数。文件 mtime 是唯一的时间信号，而 mtime 在同步、备份恢复、git 检出后全部失真。**没有元数据就没有可计算的遗忘。**
+自动 apply 写入的策展笔记 frontmatter 只有 title/type/permalink/tags；正文只有 type/status/scope/evidence/lineage 五行观察。没有稳定身份标识、`recorded_at`、`last_verified_at`、召回命中记录、强化/矛盾计数。文件 mtime 是唯一的时间信号，而 mtime 在同步、备份恢复、git 检出后全部失真。**没有元数据就没有可计算的遗忘。**
+
+范围更正（复审 G5）：手工 `remember` 路径（`write_finding`）是另一种笔记形状，其正文含 `- [recorded] <iso8601>` 时间行——Phase 0B 迁移应解析该行回填 `recorded_at`，而不是因"无法回填"降级为 `hypothesis`。两种形状的全面对齐见 §4.8。
 
 ### F5 — 去重范围受限于召回质量（确认）
 
@@ -119,7 +123,7 @@ formatter 只能对 evidence capsule 中的笔记做 `skip` / `update` 判定，
 
 ## 4. 前置契约（Phase -1 冻结项）
 
-以下七项契约必须在任何实现开始前冻结。它们是三路评审识别出的结构性缺口：跳过任何一项，后续阶段都会在错误的地基上返工。
+以下八项契约必须在任何实现开始前冻结。它们是三路评审与独立复审识别出的结构性缺口：跳过任何一项，后续阶段都会在错误的地基上返工。
 
 ### 4.1 稳定身份：`memory_id`
 
@@ -140,7 +144,7 @@ evidence:
     summary: "python -m pytest tests -q PASS（587 passed）证明 X"
 ```
 
-- `origin-slug` 用与 `.teamflow/bin/memory` / `server/src/memory/scope.ts` 完全相同的 slug 派生规则。
+- **slug 派生必须先统一为单一契约（复审 G1）。** v2 断言 origin-slug 与 bash/TS "完全相同"不成立，且漏列了真正写笔记的 Python 实现。当前三处实现并非字节等价：Python `run_pipeline.py`（`.strip("-")`，去全部首尾连字符）、bash `.teamflow/bin/memory`（`${VAR%-}`，只去一个尾部、不去首部）、TS `scope.ts`（`/-+$/`，去全部尾部、不去首部）。可复现分歧：`@foo.git` → Python 得 `foo`，bash/TS 得 `-foo`；`repo--` → bash 去 1 个、Python/TS 去全部。常规 GitHub 仓名下三者重合，故历史上未暴露；但 durable evidence、permalink→memory_id 映射与 §13 同步全部建立在"同一远程解析为同一 slug"之上，写侧（Python）与读侧（TS server）分叉会造成跨机器证据解析静默失配。Phase -1 冻结单一 slug 规范（小写 → 去 `.git` 后缀 → 非 `[a-z0-9._-]` 连续段折叠为 `-` → 去全部首尾 `-`），四个实现点（Python 写侧、bash CLI、TS server、未来同步层）共享同一组金标向量（golden vectors）测试，任何一处漂移即测试失败。
 - 解析语义分级：本机工件存在 → 解引用并用 digest 校验；工件不存在（换机、删项目）→ 笔记内联 summary 仍自足可用，digest 作为"引用的是哪份证据"的指纹。
 - 笔记正文 `[evidence]` 观察行写人类可读摘要（命令 + 结论），保证笔记脱离一切运行产物后仍能独立回答"凭什么信这条记忆"。
 
@@ -205,6 +209,7 @@ append-only 不等于自动可靠。每条账本事件：
 - **幂等应用**：结算以 `event_id` 去重，重复应用无副作用。
 - **结算 watermark**：`state/usage-ledger/watermark.json` 记录各 actor 已结算位置；结算中途崩溃后从 watermark 重放。
 - **单写者锁**：`state/locks/` 文件锁；拿不到锁的 runner 显式报错退出，不静默并发写。
+- **seq 计数器的崩溃持久化（复审 G7）**：watermark 只跟踪结算水位，不管发号。每个 actor 的 seq 计数器持久化在 `state/usage-ledger/actors/<device>.json`，发号顺序固定为"原子推进计数器（临时文件 + rename）→ 追加事件"。计数器推进后、事件落盘前崩溃会产生一个缺口——因此缺口的唯一语义是"此处曾有一次崩溃的追加"，永远不表示乱序，也永远不会因重启回退发出重复 seq。
 - **崩溃恢复**：结算 = 读事件 → 更新 frontmatter → 推进 watermark，三步中任一步崩溃后重跑收敛到同一终态。
 - **多设备合并** = 按 `event_id` 做幂等并集，无需冲突解决协议；`seq` 缺口只用于诊断，不阻塞合并。
 
@@ -221,6 +226,21 @@ append-only 不等于自动可靠。每条账本事件：
 
 - **首期 `archived` 仅是 frontmatter 可见性状态，不移动文件。** 移动文件会破坏 Basic Memory 索引一致性并使普通 read 无法解析。物理归档（移入 `state/archive/`）推迟到独立后期阶段，且必须伴随索引处理方案与按 `memory_id` 的读取支持。
 - tombstone 是**删除决策的审计记录与内容指纹**：`memory_id`、title、content sha256、完整迁移链（每步 reason/evidence/时间/操作者）。它不证明"未篡改地删除"，也不能恢复内容——恢复能力只来自 purge 前的驻留期。若未来需要 purge 后恢复，须另行设计内容托管（escrow），不属于 tombstone 职责。
+
+### 4.8 笔记形状统一（复审 G3）
+
+当前存在两种互不对齐的笔记形状，生命周期机制必须覆盖两者：
+
+| 路径 | type | folder | tags | 时间戳 |
+| --- | --- | --- | --- | --- |
+| 自动 apply | `teamflow-memory`（落盘 `teamflow_memory`） | `…/curated` | `teamflow,curated,<type>` | 无 |
+| 手工 `write_finding` | `teamflow-finding` | `projects/<slug>` / `global`（无 `/curated`） | `coding,teamflow,verified` | 有（`[recorded]` 行） |
+
+由此产生三个必须在契约层解决的盲区：
+
+1. **原子保护盲区**：原子源检测正则只匹配 `*_memory`，`teamflow-finding` 笔记不受"拒绝替换原子来源"护栏保护。契约：形状注册表显式枚举全部受管 type（`teamflow_memory`、`workflow_memory`、`teamflow_finding`、`workflow_finding`）及各自的原子性与保护等级；检测逻辑以注册表为准，不再依赖单一正则的巧合覆盖。
+2. **authority 识别盲区**：§4.3 的 `captured` 重分类签名（digest 后缀标题 + curated 目录）不匹配手工 finding；`user` 的识别规则不能只靠"签名不匹配"这种否定推断。契约：手工写入路径在写入时显式落 `authority: user`；存量手工 finding 依据 `teamflow-finding` type + `[recorded]` 行的正向签名在 Phase 0B 迁移中重分类为 `user`（此重分类是提升保护等级，可自动执行；降级方向才需要用户确认）。
+3. **手工路径的元数据落地**：§12 承诺 `remember` 补齐 §8 元数据，但纯 bash 的 `write_finding` 没有生成 ULID 或结构化 frontmatter 的机制。契约：两条写入路径收敛到同一个规范形状——统一经由一个共享的确定性写入 helper（生成 memory_id、durable evidence、authority、时间戳后落盘），bash 只做参数收集。写入机制需在 Phase -1 一并冻结：自定义 frontmatter 字段若超出 `write-note` CLI 能力，则采用"直接写 knowledge/ 文件 + 触发 sync 索引"的文件优先路径（Basic Memory 本身是 file-first 设计），并以形状一致性测试固定。
 
 ## 5. 核心原则
 
@@ -327,7 +347,7 @@ evidence:                        # §4.2 durable evidence 数组
 
 把 F3 的 deferred 队列变成受控执行。`apply_candidates` 的新行为：
 
-- `create`：不变，另回写 §8 元数据（memory_id、durable evidence）；对 receipt `memory_feedback` 中的每个事件落账。
+- `create`：语义候选的判定规则不变，但**执行方式改变**（复审 G2 消除 v2 内部矛盾）：create 是 §4.6 journal 内带 commit 标记的第一个步骤——先写 txn 意图，write-note 成功且校验通过后写 create commit 标记，随后的 deprecate 步骤才允许执行。§4.6 的崩溃恢复分叉（create 已 commit → 前滚；未 commit → 放弃）以该标记为准。create 同时回写 §8 元数据（memory_id、durable evidence），并对 receipt `memory_feedback` 中的每个事件落账。
 - `update`：仅当目标是原子笔记且新证据严格更强时，向目标笔记**追加**新的 evidence 条目与 `last_verified_at`（不改语义正文）；语义变化一律降级为 supersede 提案。
 - `supersede`：写入 `state/proposals/`，并在同一 run 内由确定性 runner 按 §4.6 journal 执行安全部分——被取代笔记置 `deprecated` + `superseded_by` 指向新笔记 memory_id；笔记原文一字不动。执行条件（全部满足才执行，否则留在 proposals 等待 sweep 或人工）：
   1. 新笔记本次已成功 create 且 journal 确认提交；
@@ -340,7 +360,7 @@ evidence:                        # §4.2 durable evidence 数组
 - `recall` 默认过滤 `state != active`（Phase 2 起生效）；显式 `TEAMFLOW_MEMORY_RECALL_STATES=active,deprecated` 可扩大范围（审计、整备用）。
 - **排序首期不动**：保持 upstream 排序，只对每条结果附加 `state/strength/recorded_at/last_verified_at` 标注，让 planner 对低强度命中保持怀疑（对齐"stale notes are leads, not authority"）。禁止任何 `relevance × strength` 直接组合——FTS 分数符号与方向依后端而变（§2 F6）；若 Phase 3 校准后需要重排，只允许"名次归一化后组合"或"强度分桶降级"两种后端无关方案。
 - 每次 recall 的命中作为 `recalled` 事件写账本一行；不修改笔记文件。
-- `context` 的 `--timeframe` 从隐式 30 天改为显式配置并默认放宽到 365 天——图关系的时效交给状态机管理，不再用时间窗一刀切。
+- `context` 的 `--timeframe` 从隐式 30 天改为显式配置并默认放宽到 365 天——图关系的时效交给状态机管理，不再用时间窗一刀切。注意（复审 G6）：这是对既有 30 天消费者的**即刻行为变更**，不得埋在读路径改造里顺带发生；它是 Phase 2 中单列的带测试小交付物，与 deprecated 过滤同批启用、同批验收。
 
 ### 9.3 周期性巩固（consolidation，"睡眠期"提炼）
 
@@ -403,7 +423,7 @@ teamflow memory restore <memory-id|permalink>       # 从 deprecated/archived �
 teamflow memory proposals                # 列出滞留提案与 user/unknown 提名
 ```
 
-`recall` / `list` / `context` / `read` 行为按 §9.2 调整；`remember` / `remember-global` 写入时补齐 §8 元数据并标记 `authority: user`。
+`recall` / `list` / `context` / `read` 行为按 §9.2 调整；`remember` / `remember-global` 改经 §4.8 统一写入 helper 落盘（生成 memory_id、durable evidence、`authority: user` 与时间戳），bash 入口只做参数收集。
 
 ## 13. 云端演进兼容性
 
@@ -422,19 +442,22 @@ teamflow memory proposals                # 列出滞留提案与 user/unknown �
 
 ### Phase -1 — 契约冻结
 
-冻结 §4 全部七项：memory_id、事件 schema、durable evidence URI、遗留默认值（authority: unknown）、账本契约、事务与恢复契约、归档/tombstone 契约。交付契约级测试骨架与 schema 样例，不写任何运行时行为。
+冻结 §4 全部八项：memory_id、事件 schema（含 seq 发号持久化）、durable evidence URI 与**统一 slug 规范**（G1，含四实现点金标向量）、遗留默认值（authority: unknown）、账本契约、事务与恢复契约、归档/tombstone 契约、**笔记形状注册表与统一写入 helper 机制**（G3）。交付契约级测试骨架与 schema 样例，不写任何运行时行为。复审明确要求 G1、G2 在本阶段冻结前解决：G2 已在 §9.1 消除（create 为 journaled 步骤），G1 以 slug 规范冻结落地。
 
 ### Phase 0A — 只读 audit（最窄首切片）
 
-只实现 `teamflow memory audit --format json`：真实分布、悬空证据面、重复候选、老化统计、候选参数下的强度 dry-run 直方图。零写入、零可见性变更。测试落点：
+只实现 `teamflow memory audit --format json`：真实分布、悬空证据面、重复候选、老化统计、候选参数下的强度 dry-run 直方图，以及作为一等输出的存量 captured 重分类清单（G4 解锁门槛的输入）。零写入、零可见性变更。测试落点：
 
 - `tests/runtime/bin/test_memory_audit.py`
 - `tests/runtime/skills/test_memory_candidate_content.py`
 - `tests/runtime/skills/test_memory_pipeline_receipts.py`
 
-### Phase 0B — provenance 修复
+### Phase 0B — provenance 修复与存量整备
 
-新写入落 memory_id + durable evidence（§4.1/§4.2）；存量笔记幂等补发 memory_id 与 `authority: unknown`；F1 只加 round-trip 兼容测试，无存量迁移。
+- 新写入落 memory_id + durable evidence（§4.1/§4.2），两条写入路径收敛到 §4.8 统一 helper；写侧 `--type` 改传规范下划线串（G8）。
+- 存量笔记幂等补发 memory_id 与 `authority: unknown`；手工 finding 依 §4.8 正向签名重分类为 `authority: user`，并解析 `[recorded]` 行回填 `recorded_at`（G5），仅在完全无时间信号时才降为 `hypothesis`。
+- F1 只加 round-trip 兼容测试，无类型串存量迁移。
+- **存量库 bootstrapping 门槛（复审 G4）**：§9.1 supersede 自动执行要求 `authority: captured`，而存量一律默认 `unknown`——因此在用户对 audit 产出的 captured 重分类清单做一次性批量确认之前，自动遗忘对整个历史库只能提名、不能执行；Phase 2 的自动能力在此之前仅覆盖 Phase 0B 之后新捕获的笔记。audit 必须把该清单作为一等输出，重分类确认是解锁存量自动遗忘的显式门槛。
 
 ### Phase 1 — shadow ledger 与 proposal-only
 
@@ -442,7 +465,9 @@ recall/capture 开始记账（§4.5 完整契约：event_id、watermark、锁、
 
 ### Phase 2 — 唯一迁移：active → deprecated
 
-按 §4.6 journal 执行 supersede → deprecated（仅 frontmatter，保留文件位置）；recall 默认过滤 deprecated。不实现 archived/purged。
+按 §4.6 journal 执行 supersede → deprecated（仅 frontmatter，保留文件位置）；recall 默认过滤 deprecated；`context` timeframe 30d→365d 作为单列带测试交付物同批启用（G6）。不实现 archived/purged。
+
+范围限制（G4）：在存量 captured 重分类获用户确认之前，本阶段的自动降级只作用于 Phase 0B 之后新捕获的 `captured` 笔记；存量 `unknown` 笔记只进提名清单。
 
 ### Phase 3 — restore 与 dry-run sweep
 
@@ -465,12 +490,15 @@ archived 的物理归档方案（索引一致性 + 按 memory_id 读取）与默
 - 任一策展笔记在任何生命周期状态下都可由 `memory_id` 定位；permalink 变更不影响账本、tombstone、superseded_by 的解析。
 - 新写入笔记携带 durable evidence（uri + digest + 内联摘要），脱离运行产物后仍能独立回答"凭什么信"。
 - 遗留笔记补发 memory_id 与 `authority: unknown` 的迁移可重复运行且结果幂等；`unknown` 笔记在全部自动路径中获得与 `user` 同级保护。
-- round-trip 兼容测试证明连字符 `--type` 输入落盘为下划线 frontmatter 且被检测正则命中。
-- 账本结算在人为注入的中途崩溃后重跑收敛：无重复计数、watermark 正确、并发第二写者被锁显式拒绝。
-- journal 状态机在 create 已提交/未提交两种崩溃点上分别前滚/放弃，最终不存在"源已降级而新笔记未落地"状态。
+- 写侧直接输出规范下划线类型串；round-trip 兼容测试证明连字符输入落盘为下划线 frontmatter 且被检测正则命中（覆盖存量与第三方路径）。
+- 四个 slug 实现点通过同一组金标向量测试（含 `@foo.git`、`repo--` 等已知分歧用例），任何一处漂移即失败。
+- 两条写入路径产出同一规范笔记形状（形状一致性测试）；`teamflow-finding` 存量被形状注册表识别并获得原子级保护。
+- 账本结算在人为注入的中途崩溃后重跑收敛：无重复计数、watermark 正确、并发第二写者被锁显式拒绝；seq 计数器在"推进后、事件落盘前"崩溃点上重启后不发重复号，缺口被诊断为崩溃追加而非乱序。
+- journal 状态机在 create 已提交/未提交两种崩溃点上分别前滚/放弃，最终不存在"源已降级而新笔记未落地"状态；create 本身携带 commit 标记（不存在绕过 journal 的直接 write-note 路径）。
+- 存量库在 captured 重分类确认前，全部自动降级路径对 `unknown` 笔记只产生提名——用构造的存量数据集验证零执行。
 - 一次带 supersede 候选的 capture 结束后，被取代笔记退出默认召回，`read` 显示 `superseded_by`，且文件未移动。
 - Phase 5 之前不发生任何笔记文件移动；任何 purge 之前 tombstone 先落盘。
-- `audit --format json` 是第一个交付物，且在只读前提下产出 §2 全部七个维度。
+- `audit --format json` 是第一个交付物，且在只读前提下产出 §2 全部七个维度与存量 captured 重分类清单。
 - 召回基线对照（§2 审计第 7 项）在整备 + 遗忘上线后 top-8 信噪比不降低。
 
 ## 16. 待确认参数
@@ -482,4 +510,6 @@ archived 的物理归档方案（索引一致性 + 按 memory_id 读取）与默
 5. 物理归档阶段的索引方案：单独 Basic Memory project、独立 SQLite，还是纯文件 + memory_id 索引。
 6. 是否需要 purge 前内容托管（escrow）以支持 tombstone 之外的恢复（倾向：不需要，驻留期已覆盖）。
 7. 冷存储打包格式与压缩粒度（按 session 还是按月）。
-8. `user`/`unknown` 提名的确认交互形态（CLI 确认 vs server 界面）。
+8. `user`/`unknown` 提名与存量 captured 重分类清单的确认交互形态（CLI 确认 vs server 界面；G4 的批量确认与单条提名是否同一入口）。
+9. §4.8 统一写入 helper 的落地形态：直接写 `knowledge/` 文件 + 触发 sync（file-first，倾向），还是 `write-note` + `edit-note` 组合——取决于 Basic Memory CLI 对自定义 frontmatter 字段的写入与保留能力，Phase -1 以实测定案。
+10. 统一 slug 规范定案后，bash/TS 读侧对存量"按旧规则派生"的 permalink 前缀是否需要兼容映射（倾向：常规仓名无分歧，不做映射，仅金标测试防新分歧）。
