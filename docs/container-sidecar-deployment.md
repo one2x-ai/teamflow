@@ -6,7 +6,7 @@
 
 一个 Kubernetes Pod 内运行两个容器，共享同一个网络命名空间（network namespace）：
 
-- **Teamflow 容器**：直接以 exec-form 运行 `opencode web`，只绑定回环地址 `127.0.0.1:13000`（loopback only）。容器内没有 shell supervisor、没有 Node 健康网关、没有第二个进程；进程与生命周期完全由 Kubernetes 管理（重启策略、探针、资源限制都由 Pod spec 声明）。
+- **Teamflow 容器**：直接以 exec-form 运行 `opencode serve`（headless 服务器模式，仍对外提供 Web UI；`opencode web` 会尝试调用容器内不可用的 `xdg-open` 而崩溃），只绑定回环地址 `127.0.0.1:13000`（loopback only）。容器内没有 shell supervisor、没有 Node 健康网关、没有第二个进程；进程与生命周期完全由 Kubernetes 管理（重启策略、探针、资源限制都由 Pod spec 声明）。
 - **Caddy sidecar 容器**：占用公开端口 `:3000`（port 3000），反向代理到同 Pod 内 Teamflow 容器的 `127.0.0.1:13000`。因为两个容器共享网络命名空间，Caddy 通过 loopback 即可到达 OpenCode，无需 Service 或额外网络配置。
 
 Caddy 不进 Teamflow 镜像；它是独立的 sidecar 镜像，由部署清单（Deployment/StatefulSet）装配。
@@ -31,7 +31,7 @@ Basic Auth 保留在 OpenCode 自身：Caddy 只透传 `Authorization` 头，不
 
 ## 4. 进程与生命周期
 
-- Teamflow 容器的唯一进程是 `opencode web --hostname 127.0.0.1 --port 13000`，PID 1 语义、信号处理、崩溃重启全部由 Kubernetes 负责；容器内**不允许**再引入 supervisor 或包装脚本。
+- Teamflow 容器的唯一进程是 `opencode serve --hostname 127.0.0.1 --port 13000`，PID 1 语义、信号处理、崩溃重启全部由 Kubernetes 负责；容器内**不允许**再引入 supervisor 或包装脚本。
 - 健康探针分两层，两个容器各自独立声明：
   - **Caddy 容器**：HTTP liveness/readiness 探针指向公开端口 `:3000` 的合成健康路由（kube-probe UA 命中时由 sidecar 直接返回 `ok`，不转发到上游），避免未认证探针打到 loopback 上的 OpenCode。
   - **Teamflow（OpenCode）主容器**：带认证的 exec liveness/readiness 探针，在容器内对 `127.0.0.1:13000` 发起认证请求，只有 OpenCode 进程真实存活且认证通过才算就绪。
@@ -61,12 +61,12 @@ Pod 替换或重启后，由于 PVC 重新挂载到相同路径，上述数据�
 
 不带 sidecar 独立运行镜像时（standalone `docker run`），需要区分两种网络契约：
 
-- **默认命令是 loopback 工作负载契约**：镜像 CMD 为 `opencode web --hostname 127.0.0.1 --port 13000`，只绑定容器内回环地址。这是为 sidecar 拓扑设计的——同 Pod 的 Caddy 经共享网络命名空间访问它。此时即使 `docker run -p 13000:13000` 发布端口，流量指向容器网络接口，也到不了回环地址上的进程。
+- **默认命令是 loopback 工作负载契约**：镜像 CMD 为 `opencode serve --hostname 127.0.0.1 --port 13000`，只绑定容器内回环地址。这是为 sidecar 拓扑设计的——同 Pod 的 Caddy 经共享网络命名空间访问它。此时即使 `docker run -p 13000:13000` 发布端口，流量指向容器网络接口，也到不了回环地址上的进程。
 - **本地直接访问**必须显式覆盖命令，放开绑定地址：
 
 ```bash
 docker run -e OPENCODE_SERVER_USERNAME=$OPENCODE_SERVER_USERNAME -e OPENCODE_SERVER_PASSWORD=$OPENCODE_SERVER_PASSWORD -p 13000:13000 \
-  teamflow-opencode-web opencode web --hostname 0.0.0.0 --port 13000
+  teamflow-opencode-web opencode serve --hostname 0.0.0.0 --port 13000
 ```
 
 持久化方面，镜像本身不会创建外部持久卷。如需持久化，必须挂载（volume / 挂载）一个已按相同目录布局（`/workspace/opencode` 与 `/workspace/teamflow`）初始化的 volume，或提供等价的初始化步骤；否则容器重建后状态丢失。

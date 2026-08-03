@@ -1,7 +1,7 @@
 """Requirement tests for the root Dockerfile and .dockerignore contract.
 
 Static tests assert the structure and runtime contract of a not-yet-written
-Docker image (``opencode web`` with safe hostname binding, multi-stage
+Docker image (``opencode serve`` with safe hostname binding, multi-stage
 build, non-root user, required runtime CLIs, and secret exclusion), plus
 an optional live ``docker build`` smoke check.
 
@@ -185,7 +185,7 @@ class DockerfileExistsTests(unittest.TestCase):
 # ---------------------------------------------------------------------------
 #
 # Under the container-sidecar contract, the Dockerfile CMD directly
-# executes ``opencode web`` (exec-form JSON array) binding to
+# executes ``opencode serve`` (exec-form JSON array) binding to
 # ``127.0.0.1:13000`` (loopback only).  There is no shell supervisor,
 # no Node gateway, and no second process.  The public port 3000 is
 # owned by the Caddy sidecar in the same Pod, which reverse-proxies to
@@ -193,7 +193,7 @@ class DockerfileExistsTests(unittest.TestCase):
 
 
 class CommandContractTests(unittest.TestCase):
-    """AC 2: CMD directly invokes ``opencode web`` on loopback 127.0.0.1:13000."""
+    """AC 2: CMD directly invokes ``opencode serve`` on loopback 127.0.0.1:13000."""
 
     def setUp(self):
         self.text = _require_dockerfile_text()
@@ -209,11 +209,21 @@ class CommandContractTests(unittest.TestCase):
             "CMD must be exec-form (JSON array [ ... ]), not shell-form",
         )
 
-    def test_cmd_invokes_opencode_web(self):
-        """A2: CMD directly invokes ``opencode web``."""
+    def test_cmd_invokes_opencode_serve(self):
+        """A2: CMD directly invokes ``opencode serve``."""
         cmd = _final_command(self.text)
         self.assertIn("opencode", cmd, "CMD must invoke 'opencode'")
-        self.assertIn("web", cmd, "CMD must include the 'web' subcommand")
+        self.assertIn("serve", cmd, "CMD must include the 'serve' subcommand")
+
+    def test_cmd_does_not_invoke_web(self):
+        """A2: CMD must NOT invoke ``opencode web``.
+
+        ``opencode web`` crashes in headless containers because it attempts
+        to spawn ``xdg-open``, which is unavailable.  The headless server
+        ``opencode serve`` must be used instead.
+        """
+        cmd = _final_command(self.text)
+        self.assertNotIn("web", cmd)
 
     def test_cmd_binds_loopback_hostname(self):
         """A3: CMD includes ``--hostname 127.0.0.1`` (loopback only)."""
@@ -866,7 +876,7 @@ class WorkspaceOwnershipTests(unittest.TestCase):
 # out-of-workspace path and that CMD references the absolute path
 # (``/opt/teamflow-runtime/scripts/opencode_health_gateway.js``).
 # This contract is retired because ``scripts/opencode_health_gateway.js``
-# was removed.  The container now runs ``opencode web`` directly with no
+# was removed.  The container now runs ``opencode serve`` directly with no
 # launcher at an immutable out-of-workspace path.  No weaker substitute
 # is introduced.
 

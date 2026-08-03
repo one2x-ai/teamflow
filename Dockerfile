@@ -1,5 +1,5 @@
 # Multi-stage image for the Teamflow OpenCode web runtime.
-# The container runs `opencode web` directly (exec-form), binding loopback
+# The container runs `opencode serve` directly (exec-form), binding loopback
 # 127.0.0.1:13000 only, with cwd=/workspace/teamflow. A Caddy sidecar in the
 # same Pod owns public port 3000 and reverse-proxies to this container.
 
@@ -59,4 +59,4 @@ EXPOSE 13000
 
 USER opencode
 
-CMD ["opencode", "web", "--hostname", "127.0.0.1", "--port", "13000"]
+CMD ["opencode", "serve", "--hostname", "127.0.0.1", "--port", "13000"]

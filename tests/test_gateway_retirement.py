@@ -1,7 +1,7 @@
 """Retirement tests: the custom Node health gateway is gone.
 
 Under the container-sidecar contract, ``scripts/opencode_health_gateway.js``
-is retired.  The Dockerfile directly executes ``opencode web`` on
+is retired.  The Dockerfile directly executes ``opencode serve`` on
 loopback 127.0.0.1:13000, and the public-port health-probe synthesis and
 auth forwarding belong to the Caddy sidecar (documented in
 ``docs/container-sidecar-deployment.md``, not reimplemented here).

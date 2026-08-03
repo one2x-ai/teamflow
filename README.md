@@ -184,7 +184,7 @@ teamflow debug skill
 
 ## 容器运行（Docker）
 
-仓库根目录提供多阶段 `Dockerfile`：构建阶段安装 `opencode-ai`、`@earendil-works/pi-coding-agent` 与 `basic-memory`（经 uv），运行阶段以非 root 用户 `opencode` 在 `WORKDIR /workspace/teamflow`（镜像构建时从公开仓库检出的 Git 工作树，含 `.teamflow/` 运行时）下直接以 exec-form 运行 `opencode web`，只绑定回环地址 `127.0.0.1:13000`。公开端口 3000 由同 Pod 内的 Caddy sidecar 占用并反向代理到该容器；健康探针合成与认证转发属于 Caddy sidecar 的职责，不在本镜像内实现。
+仓库根目录提供多阶段 `Dockerfile`：构建阶段安装 `opencode-ai`、`@earendil-works/pi-coding-agent` 与 `basic-memory`（经 uv），运行阶段以非 root 用户 `opencode` 在 `WORKDIR /workspace/teamflow`（镜像构建时从公开仓库检出的 Git 工作树，含 `.teamflow/` 运行时）下直接以 exec-form 运行 `opencode serve`（headless 服务器模式，仍对外提供 Web UI；`opencode web` 会尝试调用容器内不可用的 `xdg-open` 而崩溃），只绑定回环地址 `127.0.0.1:13000`。公开端口 3000 由同 Pod 内的 Caddy sidecar 占用并反向代理到该容器；健康探针合成与认证转发属于 Caddy sidecar 的职责，不在本镜像内实现。
 
 - 凭据：模型与运行时密钥一律在 `docker run` 时通过环境变量注入；镜像不含任何凭据或 `.env` 内容。
 - 登录凭证：`OPENCODE_SERVER_USERNAME` 和 `OPENCODE_SERVER_PASSWORD` 两者都是必需的（required for a stable known login）；缺省时 OpenCode 每次启动随机生成不可预测的凭证（random credentials），无法稳定登录。
@@ -194,9 +194,9 @@ docker build -t teamflow-opencode-web .
 # 镜像默认命令只绑定容器内回环地址 127.0.0.1；不带 sidecar 独立运行时必须显式覆盖命令放开绑定，
 # 否则 -p 发布的端口指向容器网络接口，流量到不了回环地址上的进程。
 docker run -e OPENCODE_SERVER_USERNAME=$OPENCODE_SERVER_USERNAME -e OPENCODE_SERVER_PASSWORD=$OPENCODE_SERVER_PASSWORD -p 13000:13000 \
-  teamflow-opencode-web opencode web --hostname 0.0.0.0 --port 13000
+  teamflow-opencode-web opencode serve --hostname 0.0.0.0 --port 13000
 # 推荐：用 --env-file 避免密钥进入 shell 历史
-# docker run --env-file .env -p 13000:13000 teamflow-opencode-web opencode web --hostname 0.0.0.0 --port 13000
+# docker run --env-file .env -p 13000:13000 teamflow-opencode-web opencode serve --hostname 0.0.0.0 --port 13000
 ```
 
 检出源与版本由 `ARG TEAMFLOW_REPO_URL`（默认公开 GitHub 仓库）与 `ARG TEAMFLOW_REPO_REF`（默认 `main`）控制。单 Pod 双容器拓扑、健康探针合成、持久化、rollout/rollback 等完整设计见 `docs/container-sidecar-deployment.md`。
