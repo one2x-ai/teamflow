@@ -368,6 +368,20 @@ class RequiredRuntimeFilesTests(unittest.TestCase):
             "Dockerfile must install basic-memory (via uv)",
         )
 
+    def test_installs_pinned_official_bun_in_final_runtime(self):
+        final_stage = re.split(r"(?im)^\s*FROM\s+", self.text)[-1]
+        self.assertRegex(
+            final_stage,
+            r"(?im)^\s*COPY\s+--from=oven/bun:\d+\.\d+\.\d+\s+"
+            r"/usr/local/bin/bun\s+/usr/local/bin/bun\s*$",
+            "final runtime stage must copy Bun from a pinned official image",
+        )
+        self.assertNotRegex(
+            final_stage,
+            r"(?i)oven/bun:(?:latest|1)(?:\s|$)",
+            "Bun source must use a complete pinned release tag",
+        )
+
     def test_nodejs_22_available(self):
         node_patterns = [
             r"node:\s*2[2-9]",
@@ -967,7 +981,7 @@ class DeterministicCheckoutTests(unittest.TestCase):
             "Dockerfile must declare ARG TEAMFLOW_REPO_REF",
         )
 
-    def test_teamflow_repo_ref_default_is_commit_hash(self):
+    def test_teamflow_repo_ref_default_is_main_branch(self):
         m = re.search(
             r"(?im)^\s*ARG\s+TEAMFLOW_REPO_REF\s*=\s*(\S+)",
             self.text,
@@ -977,18 +991,11 @@ class DeterministicCheckoutTests(unittest.TestCase):
             "Dockerfile must declare ARG TEAMFLOW_REPO_REF with a default",
         )
         default_val = m.group(1).strip().strip('"').strip("'")
-        rejected = {"main", "master", "develop", "head"}
-        self.assertNotIn(
-            default_val.lower(),
-            rejected,
-            "TEAMFLOW_REPO_REF default must not be a bare branch name "
-            f"(got '{default_val}')",
-        )
-        self.assertRegex(
+        self.assertEqual(
             default_val,
-            r"^[0-9a-f]{7,40}$",
-            "TEAMFLOW_REPO_REF default must be a pinned commit hash "
-            f"(7-40 hex chars, got '{default_val}')",
+            "main",
+            "TEAMFLOW_REPO_REF must default to the repository main branch "
+            f"(got '{default_val}')",
         )
 
     def test_no_literal_github_credentials(self):
@@ -1133,43 +1140,33 @@ class WorkspaceReadmeDocTests(unittest.TestCase):
             "README must document the /workspace/teamflow checkout path",
         )
 
-    def test_readme_documents_no_pvc_persistence(self):
+    def test_readme_documents_playground_workspace_persistence(self):
         lower = self.text.lower()
-        has_pvc_term = any(
-            term in lower for term in ("pvc", "持久卷", "persistent")
+        self.assertIn(
+            "pvc",
+            lower,
+            "README must mention the Playground PVC",
         )
-        has_no_term = any(
-            term in lower for term in ("no ", "without", "不", "无")
+        self.assertIn(
+            "/workspace",
+            self.text,
+            "README must document the persisted /workspace mount",
         )
-        self.assertTrue(
-            has_pvc_term,
-            "README must mention PVC persistence absence "
-            "(look for 'PVC', '持久卷', or 'persistent')",
-        )
-        self.assertTrue(
-            has_no_term,
-            "README must state there is no PVC persistence "
-            "(look for 'no ', 'without', '不', or '无' near the PVC mention)",
+        self.assertRegex(
+            lower,
+            r"pod[^\n]*(?:保留|preserv)",
+            "README must state that Playground Pod replacement preserves data",
         )
 
-    def test_readme_documents_pod_replacement_discards_edits(self):
+    def test_readme_documents_standalone_volume_requirement(self):
         lower = self.text.lower()
-        has_pod_term = any(
-            term in lower for term in ("pod", "replacement", "重启", "替换")
-        )
-        has_discard_term = any(
-            term in lower
-            for term in ("discard", "丢失", "uncommitted", "未提交")
+        self.assertTrue(
+            any(term in lower for term in ("独立", "standalone")),
+            "README must distinguish standalone container behavior",
         )
         self.assertTrue(
-            has_pod_term,
-            "README must mention Pod replacement "
-            "(look for 'Pod', 'pod', 'replacement', '重启', or '替换')",
-        )
-        self.assertTrue(
-            has_discard_term,
-            "README must mention that Pod replacement discards uncommitted "
-            "edits (look for 'discard', '丢失', 'uncommitted', or '未提交')",
+            any(term in lower for term in ("volume", "挂载")),
+            "README must tell standalone users to mount persistent storage",
         )
 
 

@@ -508,6 +508,6 @@ docker run -e OPENCODE_SERVER_USERNAME=$OPENCODE_SERVER_USERNAME -e OPENCODE_SER
 
 ### 工作区路径与 Git 检出
 
-容器内 OpenCode 的工作目录是 `/workspace/teamflow`，这是镜像构建时从公开仓库 `https://github.com/one2x-ai/teamflow.git` 检出的完整 Git 工作树（非 bare）。检出源和版本通过 Dockerfile 的 `ARG TEAMFLOW_REPO_URL`（默认公开仓库）和 `ARG TEAMFLOW_REPO_REF`（默认固定 commit）控制，构建时可覆盖。仓库为公开（visibility: public），无需认证凭据。
+容器内 OpenCode 的工作目录是 `/workspace/teamflow`，这是镜像构建时从公开仓库 `https://github.com/one2x-ai/teamflow.git` 检出的完整 Git 工作树（非 bare）。检出源和版本通过 Dockerfile 的 `ARG TEAMFLOW_REPO_URL`（默认公开仓库）和 `ARG TEAMFLOW_REPO_REF`（默认 `main` 分支）控制，构建时可覆盖。仓库为公开（visibility: public），无需认证凭据。
 
-由于未使用 PVC 持久卷（无持久存储），Pod 替换（重启）会丢失 `/workspace/teamflow` 中所有未提交的编辑。
+当前 One2X Playground 部署把 20Gi PVC 挂载到 `/workspace`：OpenCode 状态位于 `/workspace/opencode`，Teamflow Git 工作区位于 `/workspace/teamflow`，因此 Pod 替换或重启后仍保留数据。独立运行 Docker 镜像时，镜像本身不会创建外部持久卷；如需持久化，必须挂载已初始化为相同目录布局的 volume，或提供等价的初始化步骤。

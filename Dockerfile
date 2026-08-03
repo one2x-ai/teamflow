@@ -24,10 +24,9 @@ RUN npm install --global opencode-ai@1.18.4 @earendil-works/pi-coding-agent
 FROM node:22-slim AS runtime
 
 # Configurable repository checkout (public repo, no credentials needed).
-# CI should override TEAMFLOW_REPO_REF with the exact commit SHA via
-# --build-arg for reproducible, up-to-date checkouts.
+# Override TEAMFLOW_REPO_REF with --build-arg when a non-default ref is needed.
 ARG TEAMFLOW_REPO_URL=https://github.com/one2x-ai/teamflow.git
-ARG TEAMFLOW_REPO_REF=0e4c0cfd
+ARG TEAMFLOW_REPO_REF=main
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
@@ -35,6 +34,7 @@ RUN apt-get update \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+COPY --from=oven/bun:1.3.14 /usr/local/bin/bun /usr/local/bin/bun
 COPY --from=builder /opt/uv-tools /opt/uv-tools
 COPY --from=builder /opt/uv-python /opt/uv-python
 COPY --from=builder /usr/local/bin /usr/local/bin
@@ -45,7 +45,7 @@ RUN groupadd --system --gid 1001 opencode \
 
 ENV PATH="/opt/uv-tools/bin:${PATH}"
 
-# Clone the public repository to /workspace/teamflow at a pinned revision.
+# Clone the public repository to /workspace/teamflow at the configured ref.
 # The repo is public (visibility: public), so no authenticated BuildKit
 # secret is required. The clone creates a non-bare checkout with a valid
 # .git directory and full file tree.
