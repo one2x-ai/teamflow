@@ -1,7 +1,7 @@
 # Multi-stage image for the Teamflow OpenCode web runtime.
-# Final command: node /opt/teamflow-runtime/scripts/opencode_health_gateway.js
-# (gateway binds 0.0.0.0:${PORT:-3000} and spawns opencode web on loopback
-#  with cwd=/workspace/teamflow)
+# The container runs `opencode serve` directly (exec-form), binding loopback
+# 127.0.0.1:13000 only, with cwd=/workspace/teamflow. A Caddy sidecar in the
+# same Pod owns public port 3000 and reverse-proxies to this container.
 
 FROM node:22-slim AS builder
 
@@ -54,14 +54,9 @@ RUN mkdir -p /workspace \
     && git -C /workspace/teamflow checkout "${TEAMFLOW_REPO_REF}" \
     && chown -R opencode:opencode /workspace
 
-# Gateway and runtime launcher at an immutable path outside the workspace,
-# so container startup never depends on the clone source.
-RUN mkdir -p /opt/teamflow-runtime/scripts
-COPY --chown=opencode:opencode scripts/opencode_health_gateway.js /opt/teamflow-runtime/scripts/
-
 WORKDIR /workspace/teamflow
-EXPOSE 3000
+EXPOSE 13000
 
 USER opencode
 
-CMD ["node", "/opt/teamflow-runtime/scripts/opencode_health_gateway.js"]
+CMD ["opencode", "serve", "--hostname", "127.0.0.1", "--port", "13000"]
