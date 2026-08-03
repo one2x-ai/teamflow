@@ -40,10 +40,18 @@ COPY --from=builder /opt/uv-python /opt/uv-python
 COPY --from=builder /usr/local/bin /usr/local/bin
 COPY --from=builder /usr/local/lib/node_modules /usr/local/lib/node_modules
 
+# Pinned Rust toolchain: copy the cargo + rustup trees from the official
+# slim image (no apt-get cargo, no extra C toolchain). The rustup shims in
+# /usr/local/cargo/bin resolve the real toolchain via RUSTUP_HOME.
+COPY --from=rust:1.89.0-slim /usr/local/cargo /usr/local/cargo
+COPY --from=rust:1.89.0-slim /usr/local/rustup /usr/local/rustup
+
 RUN groupadd --system --gid 1001 opencode \
     && useradd --system --uid 1001 --gid opencode --create-home opencode
 
-ENV PATH="/opt/uv-tools/bin:${PATH}"
+ENV RUSTUP_HOME=/usr/local/rustup \
+    CARGO_HOME=/usr/local/cargo \
+    PATH="/usr/local/cargo/bin:/opt/uv-tools/bin:${PATH}"
 
 # Clone the public repository to /workspace/teamflow at the configured ref.
 # The repo is public (visibility: public), so no authenticated BuildKit

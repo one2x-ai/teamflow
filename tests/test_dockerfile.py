@@ -403,6 +403,93 @@ class RequiredRuntimeFilesTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Pinned Rust toolchain copied into the final runtime stage
+# ---------------------------------------------------------------------------
+#
+# The final runtime stage must make ``cargo`` and ``rustc`` reachable with
+# no manual ``source`` step.  These static assertions require a pinned
+# official ``rust:<semver>-slim`` image as the COPY source, the cargo and
+# rustup trees copied into the image, and the matching ENV exported.
+
+
+class RustToolchainTests(unittest.TestCase):
+    """Final runtime stage installs a pinned Rust toolchain.
+
+    Asserts (task acceptance criteria):
+      * pinned ``rust:<semver>-slim`` COPY source (AC2/AC3)
+      * source is never ``rust:latest`` (AC3)
+      * ``/usr/local/cargo`` copied (AC2)
+      * ``/usr/local/rustup`` copied (AC2)
+      * ``ENV PATH`` includes ``/usr/local/cargo/bin`` (AC4)
+      * ``ENV RUSTUP_HOME=/usr/local/rustup`` (AC4)
+
+    All assertions operate on the final (last FROM) runtime stage and are
+    pure static text checks; no docker daemon is required.
+    """
+
+    def setUp(self):
+        self.text = _require_dockerfile_text()
+        self.final_stage = re.split(r"(?im)^\s*FROM\s+", self.text)[-1]
+
+    def test_rust_toolchain_from_pinned_slim_image(self):
+        """COPY source is a pinned ``rust:<major.minor.patch>-slim`` tag."""
+        self.assertRegex(
+            self.final_stage,
+            r"COPY\s+--from=rust:(\d+\.\d+\.\d+)-slim\b",
+            "final runtime stage must COPY from a pinned rust:<semver>-slim",
+        )
+
+    def test_rust_source_is_not_latest(self):
+        """The Rust source image tag must not be ``latest`` (must be pinned)."""
+        rust_sources = re.findall(
+            r"COPY\s+--from=rust:(\S+)", self.final_stage
+        )
+        self.assertTrue(
+            rust_sources,
+            "final runtime stage must COPY from a rust:* image source",
+        )
+        for tag in rust_sources:
+            self.assertNotIn(
+                "latest",
+                tag,
+                "Rust source must be a pinned tag, not rust:latest",
+            )
+
+    def test_cargo_home_copied_into_runtime(self):
+        """Final stage copies the ``cargo`` tree from the Rust image."""
+        self.assertRegex(
+            self.final_stage,
+            r"COPY\s+--from=rust:\d+\.\d+\.\d+-slim\b[^\n]*/usr/local/cargo\b",
+            "final runtime stage must copy /usr/local/cargo from the rust image",
+        )
+
+    def test_rustup_toolchain_copied_into_runtime(self):
+        """Final stage copies the ``rustup`` tree from the Rust image."""
+        self.assertRegex(
+            self.final_stage,
+            r"COPY\s+--from=rust:\d+\.\d+\.\d+-slim\b[^\n]*/usr/local/rustup\b",
+            "final runtime stage must copy /usr/local/rustup from the rust image",
+        )
+
+    def test_cargo_bin_directory_on_path(self):
+        """ENV PATH includes ``/usr/local/cargo/bin`` (no manual source)."""
+        joined = _join_continuations(self.final_stage)
+        self.assertRegex(
+            joined,
+            r"ENV\b[^\n]*\bPATH\s*=[^\n]*/usr/local/cargo/bin",
+            "final runtime stage must set ENV PATH including /usr/local/cargo/bin",
+        )
+
+    def test_rustup_home_env_set(self):
+        """Final stage sets ``ENV RUSTUP_HOME=/usr/local/rustup``."""
+        self.assertRegex(
+            self.final_stage,
+            r"(?im)^\s*ENV\s+RUSTUP_HOME=/usr/local/rustup\b",
+            "final runtime stage must set ENV RUSTUP_HOME=/usr/local/rustup",
+        )
+
+
+# ---------------------------------------------------------------------------
 # AC 6 — .dockerignore secret / build-context exclusion
 # ---------------------------------------------------------------------------
 
