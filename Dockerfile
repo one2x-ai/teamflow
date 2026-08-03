@@ -31,6 +31,7 @@ ARG TEAMFLOW_REPO_REF=main
 RUN apt-get update \
     && apt-get install -y --no-install-recommends \
        git curl python3 ca-certificates build-essential \
+       pkg-config libssl-dev protobuf-compiler \
     && rm -rf /var/lib/apt/lists/*
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/

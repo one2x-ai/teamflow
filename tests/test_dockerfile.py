@@ -520,6 +520,54 @@ class RustToolchainTests(unittest.TestCase):
             "build-essential (C linker required by the Rust toolchain)",
         )
 
+    def test_runtime_stage_installs_pkg_config(self):
+        """Runtime stage apt-get installs pkg-config."""
+        joined = _join_continuations(self.final_stage)
+        blocks = re.findall(r"apt-get\s+install\b(.*?)&&", joined)
+        self.assertTrue(
+            blocks,
+            "runtime stage must contain an apt-get install command",
+        )
+        found = any("pkg-config" in block.split() for block in blocks)
+        self.assertTrue(
+            found,
+            "runtime (final) stage apt-get install set must include "
+            "pkg-config (required by the openssl-sys build script "
+            "pkg-config lookup for Rust backend-service builds)",
+        )
+
+    def test_runtime_stage_installs_libssl_dev(self):
+        """Runtime stage apt-get installs libssl-dev."""
+        joined = _join_continuations(self.final_stage)
+        blocks = re.findall(r"apt-get\s+install\b(.*?)&&", joined)
+        self.assertTrue(
+            blocks,
+            "runtime stage must contain an apt-get install command",
+        )
+        found = any("libssl-dev" in block.split() for block in blocks)
+        self.assertTrue(
+            found,
+            "runtime (final) stage apt-get install set must include "
+            "libssl-dev (OpenSSL headers required by openssl-sys for "
+            "Rust backend-service builds)",
+        )
+
+    def test_runtime_stage_installs_protobuf_compiler(self):
+        """Runtime stage apt-get installs protobuf-compiler."""
+        joined = _join_continuations(self.final_stage)
+        blocks = re.findall(r"apt-get\s+install\b(.*?)&&", joined)
+        self.assertTrue(
+            blocks,
+            "runtime stage must contain an apt-get install command",
+        )
+        found = any("protobuf-compiler" in block.split() for block in blocks)
+        self.assertTrue(
+            found,
+            "runtime (final) stage apt-get install set must include "
+            "protobuf-compiler (protoc binary required by tonic-build "
+            "gRPC stub generation for Rust backend-service builds)",
+        )
+
     def test_rust_source_uses_bookworm_variant(self):
         """COPY source uses -slim-bookworm for glibc/bookworm compatibility."""
         self.assertRegex(
