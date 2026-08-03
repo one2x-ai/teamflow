@@ -214,6 +214,7 @@ docker run -e OPENCODE_SERVER_USERNAME=$OPENCODE_SERVER_USERNAME -e OPENCODE_SER
 
 - `docs/container-sidecar-deployment.md` — 单 Pod 双容器（OpenCode + Caddy sidecar）部署设计
 - `docs/teamflow-memory-context-design.md` — memory-context 扩展的上下文接管设计
+- `docs/teamflow-memory-forgetting-design.md` — 跨项目记忆的生命周期与遗忘机制设计
 - `docs/teamflow-web-console-design.md` — server/ 记忆浏览与 opencode 代理设计
 - `docs/multi-agent-optimization-design.md` — 多 Agent 编排优化设计
 
