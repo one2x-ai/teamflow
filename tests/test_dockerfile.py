@@ -23,8 +23,8 @@ ROOT = Path(__file__).resolve().parents[1]
 DOCKERFILE = ROOT / "Dockerfile"
 DOCKERIGNORE = ROOT / ".dockerignore"
 
-#: Deterministic default container port shared by static and smoke tests.
-DEFAULT_PORT = 3000
+#: Internal loopback port the container listens on (Caddy sidecar owns 3000).
+DEFAULT_PORT = 13000
 
 #: Name of the gateway launcher script under scripts/.
 GATEWAY_SCRIPT_NAME = "opencode_health_gateway.js"
@@ -181,81 +181,77 @@ class DockerfileExistsTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AC 2 — Gateway command contract
+# AC 2 — Direct OpenCode workload (loopback, no gateway)
 # ---------------------------------------------------------------------------
 #
-# Under the gateway architecture, the Dockerfile CMD launches the gateway
-# launcher (``scripts/opencode_health_gateway.js``) instead of raw
-# ``opencode web``.  The gateway owns the public ``0.0.0.0:PORT`` listener
-# and spawns ``opencode web`` as a child on ``127.0.0.1``.  The contract
-# assertions below verify the new CMD shape without weakening EXPOSE,
-# non-root USER, multi-stage, or secret-guard assertions.
+# Under the container-sidecar contract, the Dockerfile CMD directly
+# executes ``opencode web`` (exec-form JSON array) binding to
+# ``127.0.0.1:13000`` (loopback only).  There is no shell supervisor,
+# no Node gateway, and no second process.  The public port 3000 is
+# owned by the Caddy sidecar in the same Pod, which reverse-proxies to
+# this container.
 
 
 class CommandContractTests(unittest.TestCase):
-    """AC 2: CMD launches the gateway; gateway owns 0.0.0.0:PORT bind."""
+    """AC 2: CMD directly invokes ``opencode web`` on loopback 127.0.0.1:13000."""
 
     def setUp(self):
         self.text = _require_dockerfile_text()
 
-    def test_cmd_invokes_gateway_launcher(self):
-        cmd = _final_command(self.text)
-        self.assertIn(
-            GATEWAY_SCRIPT_NAME,
-            cmd,
-            f"CMD must launch the gateway launcher ({GATEWAY_SCRIPT_NAME})",
+    def test_cmd_is_exec_form(self):
+        """A1: CMD is exec-form (JSON array), not shell-form string."""
+        lines = _logical_lines(self.text)
+        cmds = [ln for ln in lines if ln.upper().startswith("CMD")]
+        self.assertTrue(cmds, "Dockerfile must contain a CMD instruction")
+        last_cmd = cmds[-1]
+        self.assertTrue(
+            last_cmd.strip().startswith("CMD ["),
+            "CMD must be exec-form (JSON array [ ... ]), not shell-form",
         )
 
-    def test_cmd_invokes_node(self):
+    def test_cmd_invokes_opencode_web(self):
+        """A2: CMD directly invokes ``opencode web``."""
         cmd = _final_command(self.text)
-        self.assertRegex(
-            cmd,
-            r"\bnode\b",
-            "CMD must invoke 'node' to run the gateway script",
-        )
+        self.assertIn("opencode", cmd, "CMD must invoke 'opencode'")
+        self.assertIn("web", cmd, "CMD must include the 'web' subcommand")
 
-    def test_cmd_does_not_directly_run_opencode_web(self):
-        """The CMD must not directly run ``opencode web`` (gateway owns it)."""
+    def test_cmd_binds_loopback_hostname(self):
+        """A3: CMD includes ``--hostname 127.0.0.1`` (loopback only)."""
         cmd = _final_command(self.text)
-        self.assertNotRegex(
-            cmd,
-            r"\bopencode\s+web\b",
-            "CMD must launch the gateway, not raw 'opencode web'",
-        )
+        self.assertIn("127.0.0.1", cmd)
 
-    def test_public_listener_is_not_loopback(self):
-        """The gateway (not CMD flags) owns the public 0.0.0.0 bind.
+    def test_cmd_uses_port_13000(self):
+        """A4: CMD includes ``--port 13000``."""
+        cmd = _final_command(self.text)
+        self.assertIn("13000", cmd)
 
-        The CMD itself should not contain a 127.0.0.1 hostname bind.
-        The public listener is managed by the gateway script which binds
-        0.0.0.0.
-        """
+    def test_cmd_does_not_invoke_node(self):
+        """A5: CMD must NOT invoke ``node``."""
+        cmd = _final_command(self.text)
+        self.assertNotRegex(cmd, r"\bnode\b", "CMD must not invoke 'node'")
+
+    def test_cmd_does_not_reference_gateway_script(self):
+        """A6: CMD must NOT reference the gateway launcher filename."""
         cmd = _final_command(self.text)
         self.assertNotIn(
-            "127.0.0.1",
+            GATEWAY_SCRIPT_NAME,
             cmd,
-            "CMD must not bind to loopback; the gateway manages the public bind",
+            "CMD must not reference the retired gateway launcher",
         )
 
-    def test_port_default_3000_exists(self):
-        """A PORT default of 3000 must exist somewhere in Dockerfile or CMD.
+    def test_cmd_does_not_bind_public_address(self):
+        """A7: CMD must NOT contain ``0.0.0.0`` (no public bind)."""
+        cmd = _final_command(self.text)
+        self.assertNotIn("0.0.0.0", cmd)
 
-        The gateway reads ``process.env.PORT`` (default 3000).  The Dockerfile
-        may carry ``${PORT:-3000}`` in the CMD for pass-through, or the
-        default is owned by the gateway script itself.
-        """
-        self.assertTrue(
-            "3000" in self.text,
-            "PORT default of 3000 must exist in Dockerfile or CMD",
-        )
-
-    def test_expose_is_3000(self):
+    def test_expose_is_13000(self):
+        """A8: EXPOSE is 13000 (the internal loopback port)."""
         expose = re.search(r"^\s*EXPOSE\s+(\d+)", self.text, re.MULTILINE)
         self.assertIsNotNone(expose, "No EXPOSE instruction found")
         self.assertEqual(
             int(expose.group(1)),
             DEFAULT_PORT,
-            f"EXPOSE must be {DEFAULT_PORT}",
+            f"EXPOSE must be {DEFAULT_PORT} (internal loopback port)",
         )
 
 
@@ -688,216 +684,20 @@ class DockerfileNoSecretsTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AC 10 — Live auth contract (additive to the existing smoke test)
+# AC 10 — RETIRED: Live auth contract (public-port probe)
 # ---------------------------------------------------------------------------
-
-
-@unittest.skipUnless(shutil.which("docker"), "docker CLI not found")
-class LiveAuthContractTests(unittest.TestCase):
-    """Live auth contract with both env vars injected.
-
-    When ``OPENCODE_SERVER_USERNAME`` and ``OPENCODE_SERVER_PASSWORD`` are
-    both injected at runtime, anonymous ``GET /`` returns HTTP 401 and
-    Basic Auth with the injected credentials returns HTTP 200.
-
-    One2X risk: enabling Basic Auth changes anonymous ``/`` from the
-    platform-guide-expected HTTP 200 (documented by the existing
-    ``LiveDockerSmokeTests`` no-auth baseline) to HTTP 401.  The 401 and
-    200 assertions below are intentionally strict and are NOT weakened —
-    they capture this behavioral change as an explicit requirement.
-    """
-
-    #: Test-only placeholder credentials — never default or real values.
-    TEST_USER = "test-user-9f3a"
-    TEST_PASSWORD = "test-pass-7c2e"
-
-    def _docker_env(self):
-        return _strip_proxy_env()
-
-    def test_basic_auth_contract(self):
-        env = self._docker_env()
-        tag = f"teamflow-opencode-web-auth:{int(time.time())}"
-        container_id = None
-
-        # --- build ---
-        try:
-            build = subprocess.run(
-                [
-                    "docker",
-                    "build",
-                    "-t",
-                    tag,
-                    "-f",
-                    str(DOCKERFILE),
-                    str(ROOT),
-                ],
-                capture_output=True,
-                text=True,
-                timeout=BUILD_TIMEOUT,
-                env=env,
-                stdin=subprocess.DEVNULL,
-            )
-        except subprocess.TimeoutExpired:
-            self.skipTest(
-                f"docker build timed out after {BUILD_TIMEOUT}s "
-                "(registry/network)"
-            )
-        except OSError as exc:
-            self.skipTest(f"docker build failed (network/connection): {exc}")
-
-        if build.returncode != 0:
-            self.skipTest(
-                "docker build returned non-zero exit "
-                f"{build.returncode} -- likely registry/network issue"
-            )
-
-        # --- run + probe ---
-        try:
-            run = subprocess.run(
-                [
-                    "docker",
-                    "run",
-                    "-d",
-                    "--rm",
-                    "-p",
-                    f"0:{DEFAULT_PORT}",
-                    "-e",
-                    f"OPENCODE_SERVER_USERNAME={self.TEST_USER}",
-                    "-e",
-                    f"OPENCODE_SERVER_PASSWORD={self.TEST_PASSWORD}",
-                    tag,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=60,
-                env=env,
-                stdin=subprocess.DEVNULL,
-            )
-            if run.returncode != 0:
-                self.skipTest(
-                    f"docker run failed (exit {run.returncode}): "
-                    f"{run.stderr[:200]}"
-                )
-            container_id = run.stdout.strip()
-
-            host_port = self._mapped_port(container_id, env)
-            self.assertIsNotNone(host_port, "could not determine mapped host port")
-
-            self._probe_anonymous_401(host_port, env)
-            self._probe_basic_auth_200(host_port, env)
-        finally:
-            if container_id:
-                subprocess.run(
-                    ["docker", "stop", "-t", "5", container_id],
-                    capture_output=True,
-                    timeout=30,
-                    env=env,
-                    stdin=subprocess.DEVNULL,
-                )
-            subprocess.run(
-                ["docker", "rmi", "-f", tag],
-                capture_output=True,
-                timeout=30,
-                env=env,
-                stdin=subprocess.DEVNULL,
-            )
-
-    def _mapped_port(self, container_id, env):
-        port_out = subprocess.run(
-            ["docker", "port", container_id, str(DEFAULT_PORT)],
-            capture_output=True,
-            text=True,
-            timeout=15,
-            env=env,
-            stdin=subprocess.DEVNULL,
-        )
-        for line in port_out.stdout.splitlines():
-            m = re.search(r":(\d+)\s*$", line.strip())
-            if m:
-                return int(m.group(1))
-        return None
-
-    def _probe_anonymous_401(self, host_port, env):
-        last_error = None
-        for _ in range(HTTP_RETRIES):
-            try:
-                probe = subprocess.run(
-                    [
-                        "curl",
-                        "-sS",
-                        "-o",
-                        "/dev/null",
-                        "-w",
-                        "%{http_code}",
-                        "--max-time",
-                        str(HTTP_TIMEOUT),
-                        "--connect-timeout",
-                        "10",
-                        f"http://localhost:{host_port}/",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=HTTP_TIMEOUT + 15,
-                    env=env,
-                    stdin=subprocess.DEVNULL,
-                )
-                code = probe.stdout.strip()
-                if probe.returncode == 0 and code == "401":
-                    return
-                last_error = (
-                    f"curl exit={probe.returncode} http_code='{code}'"
-                )
-            except subprocess.TimeoutExpired:
-                last_error = "curl timed out"
-            except OSError as exc:
-                last_error = f"curl error: {exc}"
-            time.sleep(HTTP_RETRY_DELAY)
-        self.fail(
-            f"Anonymous GET / did not return 401 after {HTTP_RETRIES} "
-            f"retries: {last_error}"
-        )
-
-    def _probe_basic_auth_200(self, host_port, env):
-        last_error = None
-        for _ in range(HTTP_RETRIES):
-            try:
-                probe = subprocess.run(
-                    [
-                        "curl",
-                        "-sS",
-                        "-o",
-                        "/dev/null",
-                        "-w",
-                        "%{http_code}",
-                        "--max-time",
-                        str(HTTP_TIMEOUT),
-                        "--connect-timeout",
-                        "10",
-                        "-u",
-                        f"{self.TEST_USER}:{self.TEST_PASSWORD}",
-                        f"http://localhost:{host_port}/",
-                    ],
-                    capture_output=True,
-                    text=True,
-                    timeout=HTTP_TIMEOUT + 15,
-                    env=env,
-                    stdin=subprocess.DEVNULL,
-                )
-                code = probe.stdout.strip()
-                if probe.returncode == 0 and code == "200":
-                    return
-                last_error = (
-                    f"curl exit={probe.returncode} http_code='{code}'"
-                )
-            except subprocess.TimeoutExpired:
-                last_error = "curl timed out"
-            except OSError as exc:
-                last_error = f"curl error: {exc}"
-            time.sleep(HTTP_RETRY_DELAY)
-        self.fail(
-            f"Basic Auth GET / did not return 200 after {HTTP_RETRIES} "
-            f"retries: {last_error}"
-        )
+#
+# The former ``LiveAuthContractTests`` class probed the container's
+# PUBLIC port 3000 directly via ``docker run -p``.  Under the
+# container-sidecar contract, the container binds loopback
+# 127.0.0.1:13000 and owns no public endpoint.  The public port 3000
+# is owned by the Caddy sidecar in the same Pod, which performs
+# health-probe synthesis (kube-probe / ELB-HealthChecker UA → synthetic
+# ``ok``) and Basic-Auth forwarding.  That behaviour is documented in
+# ``docs/container-sidecar-deployment.md`` and is NOT reimplemented in
+# Teamflow code.  The class and its private helpers (``_mapped_port``,
+# ``_probe_anonymous_401``, ``_probe_basic_auth_200``) have been
+# removed.  No weaker substitute is introduced.
 
 
 # ---------------------------------------------------------------------------
@@ -1058,65 +858,17 @@ class WorkspaceOwnershipTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# AC 14 — Gateway launcher at an immutable path outside the workspace
+# AC 14 — RETIRED: Gateway launcher at an immutable path outside the workspace
 # ---------------------------------------------------------------------------
-
-
-class RuntimeLauncherLocationTests(unittest.TestCase):
-    """Gateway launcher is at an immutable path outside the workspace."""
-
-    def setUp(self):
-        self.text = _require_dockerfile_text()
-
-    def test_gateway_copied_outside_workspace(self):
-        copy_lines = [
-            line for line in _logical_lines(self.text)
-            if line.upper().startswith("COPY")
-        ]
-        gateway_copies = [
-            line for line in copy_lines
-            if GATEWAY_SCRIPT_NAME in line
-        ]
-        self.assertTrue(
-            gateway_copies,
-            "Dockerfile must COPY the gateway script "
-            f"({GATEWAY_SCRIPT_NAME}) to a path outside /workspace/teamflow",
-        )
-        for line in gateway_copies:
-            parts = [p for p in line.split() if not p.startswith("--")]
-            dest = parts[-1].strip('"').strip("'") if len(parts) > 2 else ""
-            self.assertFalse(
-                dest.startswith("/workspace/teamflow"),
-                "Gateway script must NOT be copied under /workspace/teamflow "
-                f"(destination '{dest}' in: {line})",
-            )
-
-    def test_cmd_references_absolute_gateway_path(self):
-        cmd = _final_command(self.text)
-        self.assertIn(
-            GATEWAY_SCRIPT_NAME,
-            cmd,
-            "CMD must reference the gateway script",
-        )
-        path_match = re.search(
-            r"(/[\S]*" + re.escape(GATEWAY_SCRIPT_NAME) + r")",
-            cmd,
-        )
-        self.assertIsNotNone(
-            path_match,
-            "CMD must reference an absolute path (starting with /) to "
-            f"{GATEWAY_SCRIPT_NAME}, not a relative path",
-        )
-
-    def test_cmd_does_not_use_relative_gateway_path(self):
-        cmd = _final_command(self.text)
-        self.assertNotRegex(
-            cmd,
-            r"(?!\w)scripts/" + re.escape(GATEWAY_SCRIPT_NAME),
-            "CMD must not reference scripts/opencode_health_gateway.js as a "
-            "relative path; use an absolute path like "
-            "/opt/teamflow-runtime/scripts/opencode_health_gateway.js",
-        )
+#
+# The former ``RuntimeLauncherLocationTests`` class asserted that the
+# Dockerfile COPYs ``scripts/opencode_health_gateway.js`` to an immutable
+# out-of-workspace path and that CMD references the absolute path
+# (``/opt/teamflow-runtime/scripts/opencode_health_gateway.js``).
+# This contract is retired because ``scripts/opencode_health_gateway.js``
+# was removed.  The container now runs ``opencode web`` directly with no
+# launcher at an immutable out-of-workspace path.  No weaker substitute
+# is introduced.
 
 
 # ---------------------------------------------------------------------------
@@ -1140,34 +892,13 @@ class WorkspaceReadmeDocTests(unittest.TestCase):
             "README must document the /workspace/teamflow checkout path",
         )
 
-    def test_readme_documents_playground_workspace_persistence(self):
-        lower = self.text.lower()
-        self.assertIn(
-            "pvc",
-            lower,
-            "README must mention the Playground PVC",
-        )
-        self.assertIn(
-            "/workspace",
-            self.text,
-            "README must document the persisted /workspace mount",
-        )
-        self.assertRegex(
-            lower,
-            r"pod[^\n]*(?:保留|preserv)",
-            "README must state that Playground Pod replacement preserves data",
-        )
-
-    def test_readme_documents_standalone_volume_requirement(self):
-        lower = self.text.lower()
-        self.assertTrue(
-            any(term in lower for term in ("独立", "standalone")),
-            "README must distinguish standalone container behavior",
-        )
-        self.assertTrue(
-            any(term in lower for term in ("volume", "挂载")),
-            "README must tell standalone users to mount persistent storage",
-        )
+    # NOTE: ``test_readme_documents_playground_workspace_persistence`` and
+    # ``test_readme_documents_standalone_volume_requirement`` were retired
+    # from this README test because the PVC / Pod-preservation and standalone
+    # deployment detail moved out of the README into the deployment design
+    # doc ``docs/container-sidecar-deployment.md`` (see C6 deployment-doc
+    # content assertions in ``tests/test_readme_docs_contract.py``).  The
+    # content is still asserted — it was not weakened, just relocated.
 
 
 if __name__ == "__main__":
