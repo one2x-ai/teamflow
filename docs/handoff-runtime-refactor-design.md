@@ -153,7 +153,7 @@ PROVIDER_FAILURE | USER_CANCELLED
 
 - **run 内并行**：`current.json` 废弃。"当前在干什么" = `ls active/`（活跃集合，每个 handoff 只碰自己的哨兵文件，天然无锁）；"发生过什么" = 折叠 `events/` 序列。`teamflow handoff status --run-id` 不带 `--id` 时返回全部活跃 handoff 的数组。
 - **实例唯一性**：handoff-id 由 CLI 生成（含序号成分），并发同名任务不会互相覆盖；`lineage.split_scope` 留在收据内容里。
-- **跨 run 并行**：run 级生命周期事件投递到 `_spool/`；`teamflow wait` 不带 `--run-id` 时监听 `_spool/` 做发现，发现后对具体 run 的 `events/` 挂子监听。
+- **跨 run 并行**：run 级生命周期事件投递到 `_spool/`；`teamflow wait` 不带 `--run-id` 时监听 `_spool/` 做发现，发现后对具体 run 的 `events/` 挂子监听。注意 `_spool/` 与 agent 注册表（2.6）不冗余：注册表是拉取式状态快照，服务内层 agent 的协同视野；`_spool/` 是可被 inotify 阻塞等待、带序号可续读的事件通知，服务外层的免轮询发现（非外层启动的 run、外层重启后按 `--since` 水位补读错过的 run 结束事件）。事件可折叠出状态，状态推导不回事件，两者是"active/ 哨兵 vs events/ 事件流"在 run 层级的同构复制。外层自己启动的 run 无需发现——run-id 直接来自 `teamflow run` 的机器可读输出行。
 - **run-id 生成**：`teamflow run` 启动时分配 run-id，注入 `TEAMFLOW_RUN_ID` 环境变量（子进程经 `...process.env` 自动继承），并以机器可读固定格式输出一行。外层不再靠 mtime 猜。
 
 ### 2.8 活性：独立纯程序流程
