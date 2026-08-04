@@ -1,12 +1,14 @@
 # Teamflow 记忆遗忘机制设计
 
-状态：设计稿 v4（未实现；实现须按 AGENTS.md 走 teamflow 多 Agent 流程）
+状态：设计稿 v5，冻结基线（未实现；实现须按 AGENTS.md 走 teamflow 多 Agent 流程，自 Phase -1 起）
 
 v2 修订依据：2026-08-03 三路评审结论 GO WITH REVISIONS——GLM-5.2 planner（session 019fc94c-bd05-72c0-b809-f3ee162ee5ac）、K3（session 019fc94e-d479-7911-89d8-17bd3c8a0120）、以及用户对当前仓库与 Basic Memory 0.22.1 源码的人工复核。主要修订：F1 更正为误报；新增 §4 前置契约；实施阶段重排为 Phase -1 起步、只读 audit 为最窄首切片、冷存储保留明确阻塞。
 
 v3 修订依据：对 v2（commit b701c36）的独立只读复审（G1–G8）。主要修订：G1——slug 三处实现并非字节等价且漏列真正写笔记的 Python 实现，§4.2 改为冻结单一 slug 契约 + 跨实现金标测试；G2——消除"create 不变"与 journaled commit 的内部矛盾，create 改为 journal 内带 commit 标记的步骤；G3——新增 §4.8 笔记形状统一契约（手工 `teamflow-finding` 路径的原子保护盲区、authority 识别、memory_id 落地）；G4——显式声明存量库 bootstrapping 限制与解锁门槛；G5——Phase 0B 解析手工笔记 `[recorded]` 行回填而非降级；G6——`context` timeframe 变更单列为 Phase 2 带测试交付物；G7——补充账本 seq 计数器的崩溃持久化规则；G8——写侧改为直接输出规范下划线类型串，消除对外部归一化的依赖。
 
 v4 修订依据：对 v3 的两路复审（planner 实跑验证 + 外层复核，均已在本机复现确认）。必修项：G1 证据链修正——`repo--` 是伪分歧（`tr -s` 压缩后三实现同为 `repo`），真分歧是内部连续连字符 `foo---bar`（bash 压缩为 `foo-bar`，Python/TS 保留），且冻结规范步骤顺序与三实现漂移（三者都是先做大小写敏感的 `.git` 去后缀再小写，`REPO.GIT` 可复现）；§15 与 Phase 0A 的审计维度枚举不一致；提案落点二义（`runs/memory/` vs `state/proposals/`）改为显式分工；restore 依赖的 memory_id 读取路径提前到 Phase 0B 起维护的映射索引。Phase -1 补齐项：形状注册表逐类型原子性/保护等级取值；存量 memory_id 回填改确定性派生；recall 记账改无锁 spool 热路径；强度公式增加 restore 项。另收编：§9.3"无新增语义"降为结构性代理约束、`update`"严格更强"给出判据、sweep 执行上下文定义为用户级、`unknown→user` 重分类措辞更正为归属澄清。
+
+v5 修订依据：对 v4 的两路终审（K3 + planner，slug 向量矩阵两路实跑一致），裁决为"可推进为冻结基线，修掉 Gap A/B 后进入 Phase -1"。Gap A——§4.2"bash 是需要修的少数派"不准确：TS 在首部连字符维度同样偏离规范，规范逐向量跟随的是 Python 参照实现，需修 bash（首部 + 压缩两点）与 TS（首部一点）；Gap B——消除 v4 引入 restore 项时的自相矛盾：§4.4 事件表补 `restore` 行、§7 引言改为五类事件。行级补充：spool 合并发号归属钉死为代原 actor 发号、spool 尾部截断容忍、§4.5 schema 的 seq 注明为合并后形态、§8.1 声明 memory_id 两种形态皆合法、§12 audit 注释对齐七维度并补 `TEAMFLOW_MEMORY_RECALL_SCOPE` 定义（更正：该变量在 `bin/memory` 中已实现，缺的只是本文档 §12 的定义）、§3.2 显式承认不优化召回线性扫描成本、§16 新增 frontmatter 派生字段回写节流待确认项。
 
 适用范围：`~/.teamflow/memory/` 下的策展知识层（Basic Memory notes）、文件级冷存储（TurnBlock / TurnIndex）、规划经验，以及未来的云端记忆后端。
 
@@ -121,6 +123,7 @@ formatter 只能对 evidence capsule 中的笔记做 `skip` / `update` 判定，
 - 不引入云服务、MCP、账号或 API Key；机制本身保持完全本地可运行。
 - 不让模型直接删除任何文件：模型只产生候选，确定性 runner 执行（与 capture 管道同构）。
 - 不做基于嵌入的自动语义合并作为首期依赖（可作为后续增强）。
+- 不优化召回的读延迟（v5 显式承认设计取舍）：`recall` 的 O(N) 分页扫描 + 本地过滤保留现状。状态过滤降低的是返回结果的噪音，不是扫描成本；读路径性能优化（索引化、预过滤下推）是独立的后续工作。
 - 不改动准则 cache（rule cache）——它已有 supersede/retire 语义，是本设计权限阶梯的参照物，不是改造对象。
 
 ## 4. 前置契约（Phase -1 冻结项）
@@ -152,7 +155,7 @@ evidence:
   3. 更正 v3 的伪分歧举例：`repo--` 三实现同为 `repo`（bash 先压缩 `--` 为 `-` 再 `%-` 去掉），不是分歧用例，只能作等价对照向量。
   4. 步骤顺序：三实现一致为"取 basename → 大小写敏感地去 `.git` 后缀 → 小写"；v3 冻结规范写成"小写 → 去 `.git`"，在 `REPO.GIT` 上与全部三实现漂移（三者得 `repo.git`，v3 规范得 `repo`）。
 
-  常规 GitHub 仓名下三者重合，故历史上未暴露；但 durable evidence、permalink→memory_id 映射与 §13 同步全部建立在"同一远程解析为同一 slug"之上，写侧（Python）与读侧（TS server）分叉会造成跨机器证据解析静默失配。Phase -1 冻结的单一 slug 规范（以现状多数语义为准，bash 是需要修的少数派）：**取 basename → 大小写敏感地去 `.git` 后缀 → 小写 → 非 `[a-z0-9._-]` 连续段折叠为单个 `-`（合法 `-` 原样保留、不压缩）→ 去全部首尾 `-`**。四个实现点（Python 写侧、bash CLI、TS server、未来同步层）共享同一组金标向量测试，必含真分歧用例 `@foo.git`、`foo---bar`、顺序哨兵 `REPO.GIT`，以及等价对照用例 `repo--`（防止金标本身给出虚假分歧信号）；任何一处漂移即测试失败。
+  常规 GitHub 仓名下三者重合，故历史上未暴露；但 durable evidence、permalink→memory_id 映射与 §13 同步全部建立在"同一远程解析为同一 slug"之上，写侧（Python）与读侧（TS server）分叉会造成跨机器证据解析静默失配。Phase -1 冻结的单一 slug 规范（Gap A 更正：规范逐向量跟随的是 **Python 参照实现**，不存在全局多数派——首部连字符维度上"保留首部"反而是 bash+TS 的 2:1 多数；需修的是 bash 两点（首部、压缩）与 TS 一点（首部），Python 无需改动）：**取 basename → 大小写敏感地去 `.git` 后缀 → 小写 → 非 `[a-z0-9._-]` 连续段折叠为单个 `-`（合法 `-` 原样保留、不压缩）→ 去全部首尾 `-`**。四个实现点（Python 写侧、bash CLI、TS server、未来同步层）共享同一组金标向量测试，必含真分歧用例 `@foo.git`、`foo---bar`、顺序哨兵 `REPO.GIT`，以及等价对照用例 `repo--`（防止金标本身给出虚假分歧信号）；任何一处漂移即测试失败。
 - 解析语义分级：本机工件存在 → 解引用并用 digest 校验；工件不存在（换机、删项目）→ 笔记内联 summary 仍自足可用，digest 作为"引用的是哪份证据"的指纹。
 - 笔记正文 `[evidence]` 观察行写人类可读摘要（命令 + 结论），保证笔记脱离一切运行产物后仍能独立回答"凭什么信这条记忆"。
 
@@ -171,7 +174,7 @@ receipt 的 `related_memory` 只被校验为字符串数组并转为管道 `--so
         fail("related_memory must be an array of memory permalinks")
 ```
 
-它最多证明"笔记曾作为 capture 输入被读取"，不能证明召回命中、规划采用、重新验证或对 PASS 有贡献。信号必须拆分为四类事件（弱 → 强）：
+它最多证明"笔记曾作为 capture 输入被读取"，不能证明召回命中、规划采用、重新验证或对 PASS 有贡献。信号必须拆分为五类事件（前四类是任务反馈，弱 → 强；`restore` 是人工恢复动作，Gap B 补齐）：
 
 | 事件 | 语义 | 生产者 |
 | --- | --- | --- |
@@ -179,6 +182,7 @@ receipt 的 `related_memory` 只被校验为字符串数组并转为管道 `--so
 | `used` | planner 在计划或 handoff 中显式采用该记忆 | receipt 新增 `memory_feedback` 字段 |
 | `verified` | 笔记声明对当前仓库重新验证通过（memory-recall 规则本要求验证，现在把结果落账） | receipt `memory_feedback`，必须附验证证据 |
 | `contradicted` | 重新验证失败，或被更强反向证据推翻 | receipt `memory_feedback`，必须附反向证据 |
+| `restore` | 用户显式将降级记忆恢复为 active（强价值信号） | `teamflow memory restore` 经确定性 runner 记账 |
 
 receipt schema 扩展：
 
@@ -205,7 +209,7 @@ append-only 不等于自动可靠。每条账本事件：
   "event_id": "01JD8...",            // ULID，全局幂等键
   "actor": {"device": "mac-wsq", "runner": "recall|capture|sweep|restore"},
   "run_id": "20260803T120000Z",
-  "seq": 42,                          // actor 内单调递增，缺口可检测
+  "seq": 42,                          // actor 内单调递增，缺口可检测；此为合并后形态——spool 事件写入时无此字段，结算发号后才有
   "memory_id": "01JD...",
   "event": "recalled|used|verified|contradicted|state_change|restore",
   "occurred_at": "2026-08-03T12:00:00Z",
@@ -217,7 +221,7 @@ append-only 不等于自动可靠。每条账本事件：
 - **幂等应用**：结算以 `event_id` 去重，重复应用无副作用。
 - **结算 watermark**：`state/usage-ledger/watermark.json` 记录各 actor 已结算位置；结算中途崩溃后从 watermark 重放。
 - **单写者锁不在召回热路径上**（复审新增发现：recall 若每次拿全局写锁追加约 8 条事件，会与 §1 问题 4 的"召回随库线性变慢"叠加，使并发召回串行化）。契约：recall 产生的 `recalled` 事件写入每进程独立 spool 文件（`state/usage-ledger/spool/<device>-<run>-<pid>.jsonl`，文件名唯一故天然无锁）；`state/locks/` 文件锁只保护结算与状态迁移两条慢路径，结算时合并 spool 并按 `event_id` 去重。拿不到锁的结算/迁移 runner 显式报错退出，不静默并发写。Phase 1 shadow 期量化 spool 开销，确认召回延迟不回归。
-- **seq 计数器的崩溃持久化（复审 G7）**：watermark 只跟踪结算水位，不管发号。每个 actor 的 seq 计数器持久化在 `state/usage-ledger/actors/<device>.json`，发号顺序固定为"原子推进计数器（临时文件 + rename）→ 追加事件"。计数器推进后、事件落盘前崩溃会产生一个缺口——因此缺口的唯一语义是"此处曾有一次崩溃的追加"，永远不表示乱序，也永远不会因重启回退发出重复 seq。无锁 spool 中的事件在写入时不携带 seq，由结算 runner 持锁合并进主分片时统一发号；seq 契约只约束持锁写入路径。
+- **seq 计数器的崩溃持久化（复审 G7）**：watermark 只跟踪结算水位，不管发号。每个 actor 的 seq 计数器持久化在 `state/usage-ledger/actors/<device>.json`，发号顺序固定为"原子推进计数器（临时文件 + rename）→ 追加事件"。计数器推进后、事件落盘前崩溃会产生一个缺口——因此缺口的唯一语义是"此处曾有一次崩溃的追加"，永远不表示乱序，也永远不会因重启回退发出重复 seq。无锁 spool 中的事件在写入时不携带 seq，由结算 runner 持锁合并进主分片时统一发号；seq 契约只约束持锁写入路径。发号归属钉死（v5）：**代事件的原 actor 发号**——结算 runner 持锁期间代为推进该 actor 的计数器（独占锁使代管无并发风险），事件 `actor` 字段语义不变，绝不以结算者身份混淆归属。合并时容忍 spool 尾部因崩溃截断的半行：丢弃无法解析的最后一行并记入诊断，不中止结算。
 - **崩溃恢复**：结算 = 读事件 → 更新 frontmatter → 推进 watermark，三步中任一步崩溃后重跑收敛到同一终态。
 - **多设备合并** = 按 `event_id` 做幂等并集，无需冲突解决协议；`seq` 缺口只用于诊断，不阻塞合并。
 
@@ -297,7 +301,7 @@ append-only 不等于自动可靠。每条账本事件：
 
 ## 7. 记忆强度模型
 
-每条笔记维护确定性可重算的强度分 `strength ∈ [0, 1]`，只由 §4.4 的四类事件与时间构成（全部可审计，不含模型主观打分）：
+每条笔记维护确定性可重算的强度分 `strength ∈ [0, 1]`，只由 §4.4 的五类事件与时间构成（全部可审计，不含模型主观打分）：
 
 ```text
 strength = clamp(
@@ -322,7 +326,7 @@ strength = clamp(
 
 ```yaml
 type: teamflow_memory
-memory_id: 01JD8QWERTY...        # §4.1 不可变身份
+memory_id: 01JD8QWERTY...        # §4.1 不可变身份；新建=随机 ULID、存量回填=确定性派生（UUIDv5 风格），两种形态皆合法
 state: active                    # active | deprecated | archived
 strength: 0.72                   # sweep 结算写入；Phase 3 前仅报告
 recorded_at: 2026-08-03T12:00:00Z
@@ -436,14 +440,16 @@ TurnBlock purge 的 tombstone 记录 block id、sequence、content hash 与 sess
 ## 12. CLI 面
 
 ```bash
-teamflow memory audit [--format json]    # §2 审计（只读，最窄首切片）：分布、悬空证据、重复候选、老化、参数模拟
+teamflow memory audit [--format json]    # §2 审计（只读，最窄首切片）：全部七个维度 + 存量 captured 重分类清单（与 Phase 0A 枚举一致）
 teamflow memory sweep [--apply]          # §9.4 衰减清扫（默认 dry-run）
 teamflow memory consolidate [--topic q] [--apply]   # §9.3 主题提炼
-teamflow memory restore <memory-id|permalink>       # 从 deprecated/archived 恢复并重置强度
+teamflow memory restore <memory-id|permalink>       # 从 deprecated/archived 恢复，落 restore 事件并按 §7 公式回升强度
 teamflow memory proposals                # 列出滞留提案与 user/unknown 提名
 ```
 
 `recall` / `list` / `context` / `read` 行为按 §9.2 调整；`remember` / `remember-global` 改经 §4.8 统一写入 helper 落盘（生成 memory_id、durable evidence、`authority: user` 与时间戳），bash 入口只做参数收集。
+
+召回范围与状态由两个正交环境变量控制（v5 补定义，更正一处评审断言：`TEAMFLOW_MEMORY_RECALL_SCOPE` 并非新变量，它已在 `bin/memory` 中实现并有 usage 文档，此前缺的只是本文档的定义）：`TEAMFLOW_MEMORY_RECALL_SCOPE`（`repository`（默认）|`all`，控制命名空间范围）与新增 `TEAMFLOW_MEMORY_RECALL_STATES`（默认 `active`，控制生命周期状态过滤）；两者叠加时按 §9.2 缺省兼容规则执行。
 
 ## 13. 云端演进兼容性
 
@@ -525,7 +531,7 @@ archived 的物理归档方案（索引一致性 + 按 memory_id 读取）与默
 
 ## 16. 待确认参数
 
-1. 四类事件权重与封顶、半衰期 `H`、阈值 `S_dep`、驻留期 `D_dep`/`D_arc`——一律以 Phase 0A/1 真实 telemetry 校准，初值仅供 dry-run。
+1. 五类事件权重与封顶、半衰期 `H`、阈值 `S_dep`、驻留期 `D_dep`/`D_arc`——一律以 Phase 0A/1 真实 telemetry 校准，初值仅供 dry-run。
 2. `actor.device` 的派生方式（hostname 易冲突；建议首次运行生成并持久化随机 device id）。
 3. `memory_feedback` 由 planner 填写的执行率如何保障（skill 提示 vs receipt 校验强制 related_memory 全覆盖）。
 4. deprecated 笔记是否参与 formatter 的去重比对（倾向：参与，防止被取代的说法换皮重生）。
@@ -539,3 +545,4 @@ archived 的物理归档方案（索引一致性 + 按 memory_id 读取）与默
 12. `origin_remote` 的多远程选择规则（倾向：固定取 `remote.origin.url`，与现有 slug 派生一致；无 origin 时记录工作树顶层目录名并显式标注来源退化）。
 13. 吞吐配平算式：创建速率（≤8/任务）与 sweep/consolidate 回收速率的量化配平模型，Phase 3 以真实 telemetry 建模，防止"回收永远追不上写入"。
 14. 账本长期体量治理：已结算分片的快照/压实（compaction）策略与原始分片保留期。
+15. §7 派生字段的回写节流（v5 收编）：strength / event_counts / last_event_at 每次 sweep 批量改写 frontmatter 会制造 diff 与 mtime 噪声——候选策略是仅当 state 迁移或 strength 跨分桶时才回写笔记文件、精确值留在结算侧存储，Phase 3 与阈值校准一并定案。
