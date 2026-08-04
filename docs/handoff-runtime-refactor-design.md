@@ -76,7 +76,8 @@
     │   └── <handoff-id>/
     │       ├── handoff.md                   # 委托方写：语义平面（Goal/Scope/Acceptance…）
     │       ├── state.json                   # 接收方经 CLI 维护：机械平面
-    │       └── receipt.json                 # 接收方经 CLI 写入的结构化结果收据
+    │       ├── receipt.json                 # 接收方经 CLI 写入的结构化结果收据
+    │       └── title.txt                    # 可选：注册表标题（默认取 Goal 行，超长时异步压缩）
     ├── active/                              # 哨兵文件：每个进行中的 handoff 一个
     │   └── <handoff-id>
     ├── events/                              # 外层唯一监听面
@@ -134,13 +135,19 @@ PROVIDER_FAILURE | USER_CANCELLED
 3. extension 在子进程退出后机械校验 `receipt.json` 存在且通过 schema；缺失或输出截断（`stopReason=length`）时由 extension 代写 `blocked` 状态（`DELEGATION_ARTIFACT_MISSING` / `OUTPUT_TRUNCATED`），不做静默重试。
 4. `task` 工具的返回值退化为指针（handoff-id + 状态 + 收据路径），planner 上下文不再承载收据正文；planner 需要细节时按需读收据文件的具体字段。
 
-### 2.6 协同看板：拉取式、紧凑
+### 2.6 agent 注册表与协同看板：派生视图、拉取式、紧凑
 
-"所有 agent 都能知道别人在干嘛"通过拉取式查询实现，不做广播，避免把外层省下的 token 在内层烧掉：
+"所有 agent 都能知道别人在干嘛"通过一张 **agent 注册表**实现。三条设计约束按铁律卡死：
 
-- `teamflow handoff list --active` 返回紧凑 JSON：id、role、goal 单行、scope 文件列表、状态。agent 按需查询。
+1. **注册表是派生视图，不是第二份可变状态。** 不存在需要各 agent 维护的 `registry.json`；`teamflow agents list` 由 CLI 现场拼装三个既有事实源——`liveness/`（pid、role、depth、心跳年龄，watchdog 维护）× `active/`（进行中的 handoff）× `handoffs/<id>/`（title、scope）。任何时刻这张表都能从磁盘事实推导出来，没有任何东西需要"记得去更新"，也就没有失同步与并发写锁问题。
+2. **title 是注册表里唯一的语义字段，压缩模型是兜底而非必经路径。** write-handoff 契约本就强制 "Goal: one observable outcome" 单行——委托方写 handoff 时已免费产出标题，注册表默认直接取该行（预算 ≤ 80 字符）。仅当 Goal 缺失或超长时，才触发一次 MiMo 2.5 Pro 压缩（与 `command`/`supervisor` 同款廉价模型）。该压缩调用必须**异步、分离、可失败**：由机械层拉起分离子进程，结果写回 `handoffs/<id>/title.txt`；未完成或失败时注册表降级显示截断的 Goal 原文。状态写入永远不等待模型调用返回——机械平面不得被语义平面阻塞。
+3. **拉取查询，永不自动注入。** agent 需要全局视野时调用 `teamflow agents list`，返回字节级稳定的紧凑 JSON（每行：role、depth、心跳年龄、handoff-id、title、scope 文件列表、状态）。成本是 O(活跃 agent 数) 的小行，10 个并行 agent 的全表约几百 token。禁止把注册表按轮自动注入 agent 上下文——那会使上下文开销随进程数线性增长，恰好复现"进程多了上下文爆炸"的问题。title 就是上下文的压缩边界：agent 之间共享的是一行标题与 scope，而不是彼此的上下文。
+
+配套机制：
+
+- `teamflow handoff list --active` 保留为 handoff 维度的同类查询（按工作单元而非按 agent 实例聚合）。
 - `handoff.md` 的 Scope 段结构化（frontmatter 或专用字段）后，CLI 在开启新 handoff 时做**并发冲突检测**：两个活跃 handoff 的 scope 文件集相交即警告——这是并行 `task_group` 的关键护栏。
-- 委托方在 handoff 正文里附上与本任务相关的看板摘录（语义平面的编排职责）；接收方默认只看到自己的 handoff。
+- 委托方在 handoff 正文里附上与本任务相关的看板摘录（语义平面的编排职责）；接收方默认只看到自己的 handoff，需要时再主动查表。
 
 ### 2.7 并行支持
 
@@ -184,12 +191,13 @@ teamflow wait [--run-id <id>] [--since <seq>] [--kind <k>,...] [--timeout 600]
 | # | 委托 | 内容 | 依赖 |
 |---|---|---|---|
 | ① | 统一失败枚举 | `blocked.reason` 顶层枚举六值落地，`budget_failure` 保留为详情；修正 observe skill 的字段描述 | 无 |
-| ② | handoff 注册表 CLI | `teamflow handoff open/finish/status/list`；目录布局、`active/` 哨兵、`_spool/`、事件投递（tmp/rename + flock 序号）；吸收 `phase_state.py` 迁移；`teamflow phase` 保留为过渡别名一个版本 | ① |
+| ② | handoff 注册表 CLI | `teamflow handoff open/finish/status/list` 与 `teamflow agents list` 派生视图；目录布局、`active/` 哨兵、`_spool/`、事件投递（tmp/rename + flock 序号）；吸收 `phase_state.py` 迁移；`teamflow phase` 保留为过渡别名一个版本 | ① |
 | ③ | `teamflow-task` 接入 | 物化 handoff、注入 `TEAMFLOW_HANDOFF_ID`、收据 schema 校验、缺失/截断代写 blocked、返回值指针化 | ② |
 | ④ | run-id 注入 | `teamflow run` 生成 run-id、注入 `TEAMFLOW_RUN_ID`、机器可读输出行 | 无 |
 | ⑤ | `agent-watchdog` | extension 点火 + 分离 watchdog 程序（心跳、退出检测、`runner_exited`、信噪分流） | ②④ |
 | ⑥ | `teamflow wait` | inotify + 轮询降级、`--since`、超时语义、字节级稳定输出 | ② |
 | ⑦ | 契约面全量迁移 | `planner.md`、`test-runner.md`、`supervisor.md`、`observe-inner-loop`、`write-handoff`（与 CLI 合流：skill 写正文，CLI 注册状态）、`.teamflow/AGENTS.md`、根 `AGENTS.md`、README、`tests/` 与 `tests/runtime/` 契约测试、`scripts/clean.py` 清理策略 | ②③⑤⑥ |
+| ⑧（可选） | title 压缩钩子 | Goal 缺失/超长时异步拉起 MiMo 压缩、写回 `title.txt`；失败降级为截断 Goal；不阻塞任何状态写入 | ②③ |
 
 实施约束：
 
