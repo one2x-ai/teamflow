@@ -21,6 +21,7 @@ import signal
 import subprocess
 import tempfile
 import time
+import threading
 import unittest
 from pathlib import Path
 
@@ -345,6 +346,77 @@ class ExitDetectionTests(unittest.TestCase):
             )
         )
         self.assertIsNotNone(record)
+
+
+class SpuriousWakeupTests(unittest.TestCase):
+    """A pidfd/proc wakeup that does not match a dead pid is spurious.
+
+    The watchdog must reconfirm with _alive before reporting an exit, so a
+    still-alive runner is never falsely reported as exited (which would emit
+    a false run-level runner_exited stop signal for the outer loop).
+    """
+
+    def test_spurious_wakeup_on_live_pid_does_not_report_exit(self):
+        import importlib.util
+
+        spec = importlib.util.spec_from_file_location("watchdog_spurious", WATCHDOG)
+        wd = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(wd)
+
+        reported = threading.Event()
+        heartbeats = [0]
+
+        def fake_alive(_pid):
+            return True  # the monitored pid never actually exits
+
+        class FakeWaiter:
+            def __init__(self, _pid):
+                pass
+
+            def wait(self, _timeout):
+                return True  # every cycle claims the pidfd is readable
+
+            def close(self):
+                pass
+
+        def fake_handoff_main(_argv):
+            reported.set()
+
+        def fake_write_heartbeat(*_a, **_kw):
+            heartbeats[0] += 1
+
+        wd._alive = fake_alive
+        wd._ExitWaiter = FakeWaiter
+        wd.handoff_state.main = fake_handoff_main
+        wd._write_heartbeat = fake_write_heartbeat
+
+        tmpdir = tempfile.mkdtemp()
+        code = Path(tmpdir) / ".teamflow" / "runs" / "code"
+        code.mkdir(parents=True)
+
+        thread = threading.Thread(
+            target=wd.main,
+            args=[[
+                "--pid", "12345",
+                "--role", "planner",
+                "--depth", "0",
+                "--run-id", "run-spurious",
+                "--runs-dir", str(code),
+                "--interval", "0.01",
+            ]],
+        )
+        thread.daemon = True
+        thread.start()
+        time.sleep(0.5)
+
+        self.assertFalse(
+            reported.is_set(),
+            "a spurious pidfd wakeup on a still-alive pid must not emit runner_exited",
+        )
+        self.assertGreater(
+            heartbeats[0], 1,
+            "the watchdog must keep monitoring through spurious wakeups",
+        )
 
 
 if __name__ == "__main__":

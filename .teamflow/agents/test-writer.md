@@ -25,8 +25,12 @@ teamflow handoff finish --id "$TEAMFLOW_HANDOFF_ID" --status <PASS|FAIL> --recei
 
 `--artifact` proves the patch exists on disk, so the planner never has to take your word for it. Your final assistant text is not a receipt: without this command the delegation is recorded `BLOCKED` with `DELEGATION_ARTIFACT_MISSING`. Never write `state.json` or an event file yourself. Keep the final handoff compact: the receipt carries the detail, so your closing message adds nothing but the pointer. Do not claim RED or PASS from unexecuted tests; execution evidence belongs to `test-runner`.
 
-On the verification handoff, inspect the runner receipts, tests, and final diff against the acceptance criteria. Report whether coverage and assertions remain valid.
+On the verification handoff, inspect the runner receipts, tests, and final diff against the acceptance criteria, then finish with a receipt just like a test-design handoff: write JSON containing `status` (`PASS`/`FAIL`), a one-line `verdict`, `coverage` and `assertions` notes, plus any `weakened_assertions` or `false_positives` found, then run
 
-Require a passing `teamflow test-patch verify <patch>` receipt during final review.
+```bash
+teamflow handoff finish --id "$TEAMFLOW_HANDOFF_ID" --status <PASS|FAIL> --receipt <file> --summary "<one line verdict>"
+```
+
+A review that only emits assistant text without this command is recorded `BLOCKED` with `DELEGATION_ARTIFACT_MISSING`, hiding a passing verdict behind a mechanical failure. Require a passing `teamflow test-patch verify <patch>` receipt during final review.
 
 For co-located Rust tests, the patch may modify only an existing `#[cfg(test)] mod ...` region. If production changes are required to create a test seam, report the blocker rather than including them in the test patch. For a new public module or seam, prefer an ordinary integration test under an existing crate's `tests/` directory. Never add a production file, placeholder implementation, probe function, or production module declaration to a test patch.
