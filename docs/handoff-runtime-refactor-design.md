@@ -1,6 +1,6 @@
 # Teamflow 内外 Loop 通信重构设计：从 phase 到 handoff
 
-状态：设计定稿，未实施
+状态：已实施（①–⑧ 全部落地）。实现入口见 `.teamflow/skills/write-handoff/scripts/handoff_state.py`、`.teamflow/skills/observe-inner-loop/scripts/{wait,watchdog,probe}.py`、`.teamflow/extensions/{teamflow-task,agent-watchdog}/`、`.teamflow/bin/pi-runtime`。
 
 适用范围：`.teamflow/` 运行时（CLI、extensions、skills、agents 契约）、外层协调循环的观察面、仓库契约测试与文档
 

@@ -4,7 +4,7 @@ This repository defines and evolves Teamflow, a multi-agent coding system.
 
 ## Architectural self-consistency
 
-Any change to this repository — product code, tests, scripts, prompts, or documentation — goes through teamflow's agents. An outer loop may write the handoff, observe phase metadata, verify artifacts, and commit; it may not implement, fix, or refactor. When a delegation returns something wrong, the outer loop collects the failure receipt and delegates again. This exercises the process on itself so defects surface here, not in business projects.
+Any change to this repository — product code, tests, scripts, prompts, or documentation — goes through teamflow's agents. An outer loop may write the handoff, observe event metadata, verify artifacts, and commit; it may not implement, fix, or refactor. When a delegation returns something wrong, the outer loop collects the failure receipt and delegates again. This exercises the process on itself so defects surface here, not in business projects.
 
 Narrow exceptions: writing or correcting the handoff itself; reverting a bad change with git; temporarily breaking something to prove a test fails, then restoring it (verification, not implementation); emergency recovery when the agent path itself is broken — say so in the report.
 
@@ -36,7 +36,9 @@ If test-first execution is skipped, state the concrete reason in the final repor
 
 ## Handoff contract
 
-A structured handoff is required for every delegation; author it with the `write-handoff` skill. Do not hand off vague requests such as "fix it" or "make tests pass".
+Coordination happens in handoffs: one unit of work moved from a delegator to a receiver, whose state the receiver maintains until a terminal status. A structured handoff is required for every delegation; author the body with the `write-handoff` skill. Do not hand off vague requests such as "fix it" or "make tests pass".
+
+State changes and state queries are programmatic; requirement expression and orchestration go through models and prompts. `teamflow handoff open/start/finish/status/list` owns every transition, sequence allocation, receipt validation, and event delivery; agents write bodies, receipts, and diagnoses. Nothing may hand-write `state.json`, an event file, an `active/` sentinel, or a liveness record.
 
 ## Engineering rules
 
@@ -47,8 +49,8 @@ A structured handoff is required for every delegation; author it with the `write
 - Prefer focused tests first, then the repository's broader lint, typecheck, test, and build gates.
 - Do not run `git push`, destructive reset, or workspace-cleaning commands unless the user explicitly requests them.
 - Record teamflow run artifacts only below `.teamflow/runs/`.
-- Record each long-running code phase with `teamflow phase`; explicit provider timeout, authentication, quota, overload, transport failure, or user cancellation ends that phase as `BLOCKED` instead of silently restarting it. Silence and elapsed wall time alone are not failures.
-- A delegated response ending with `finish=length` is output truncation, not a successful empty handoff. If its mandatory artifact is absent, finish the phase as `BLOCKED` with the truncation and missing-artifact reasons; do not silently retry inside the same phase.
+- Every delegation is a registered handoff; explicit provider timeout, authentication failure, quota exhaustion, overload, transport failure, or user cancellation finishes it `BLOCKED` instead of silently restarting it. Silence and elapsed wall time alone are not failures. `blocked.reason` is one enum: `CONTEXT_BUDGET_EXCEEDED`, `RECALL_BUDGET_EXCEEDED`, `DELEGATION_ARTIFACT_MISSING`, `OUTPUT_TRUNCATED`, `PROVIDER_FAILURE`, `USER_CANCELLED`.
+- A delegated response ending with `finish=length` is output truncation, not a successful empty handoff. When its mandatory artifact is absent the handoff is recorded `BLOCKED` with both the truncation and missing-artifact reasons; do not silently retry inside the same handoff.
 - Run `teamflow source-check` after code edits to reject accidental non-printing control bytes.
 - Keep target-project integration limited to the standard `.teamflow/` entry in `.gitignore`; do not scatter runtime files across the repository root.
 - Keep Agent prompts and Skills concise; put shared policy here instead of duplicating it.
@@ -58,7 +60,7 @@ A structured handoff is required for every delegation; author it with the `write
 
 ## External loop observation
 
-External coordinators observe metadata only: use `teamflow phase status --run-id <id>` for phase receipts, `teamflow session list --format json` for session summaries, and check expected artifact existence below `.teamflow/runs/`. Never read session files, prompts, reasoning, responses, raw errors, configuration, or credentials. Terminal silence alone is not a failure and must not terminate the inner loop.
+External coordinators observe metadata only. Wait on one blocking call — `teamflow wait --run-id <id> --since <seq>` — and escalate to `teamflow handoff status --run-id <id>` or `teamflow agents list` only when a returned status warrants it; check expected artifact existence below `.teamflow/runs/`. Never read session files, prompts, reasoning, responses, raw errors, configuration, or credentials. There are exactly two stop signals: a handoff finished `BLOCKED`, and `runner_exited` arriving while the last business event is not terminal. Terminal silence alone is not a failure and must not terminate the inner loop.
 
 ## Cross-project memory
 
@@ -74,7 +76,7 @@ Basic Memory is the fully local shared memory backend. This repository contains 
 
 ## Maintaining this repository
 
-When changing Agent models, permissions, Teamflow phase order, environment variables, frontmatter contracts, or scripts:
+When changing Agent models, permissions, the handoff lifecycle or event protocol, environment variables, frontmatter contracts, or scripts:
 
 1. Update the implementation.
 2. Update README usage and architecture notes.

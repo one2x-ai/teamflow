@@ -1,56 +1,43 @@
 ---
 name: observe-inner-loop
-description: Detect a running Teamflow inner loop's execution path from metadata only. Use when an outer coordinator must know which phase is running, whether it is BLOCKED, and whether expected artifacts exist, without paying for the inner loop's context.
+description: Observe a running Teamflow inner loop from metadata only. Use when an outer coordinator must know what the inner loop is doing, whether it is blocked, and whether expected artifacts exist, without paying for the inner loop's context.
 ---
 
 # Observe the Inner Loop
 
-You are the outer loop. You do not do the work, so observe cheaply: probe first, escalate only when something changed.
+You are the outer loop. You are not doing the work, so you must not pay for its context. Observation is one blocking call, never a poll: an unchanged inner loop must cost you nothing.
 
-## Two-command surface
-
-| Command | Worst-case cost | Bound |
-|---|---|---|
-| `teamflow probe` | One `ps` call + stat of run dirs | One line, always |
-| `teamflow session list --format json` | Reads at most 10 files | At most 10 entries, 6 keys each |
-
-Reading a run's contents from the outer loop is unsupported.
-
-## Rung 1 — liveness probe (default, every poll)
+## The whole surface
 
 ```bash
-teamflow probe
+teamflow wait --run-id <id> --since <seq> [--kind <k>,...] [--timeout 600]
 ```
 
-One line: `state=alive|exited|unknown activity=<Ns> fp=<phase:status:size>`.
-With no arguments, discovers the newest run under `.teamflow/runs/code/` by directory mtime. Exit codes: `0` alive, `1` exited, `2` unknown. `--run-id <id>` pins a run; `--pid <pid>` overrides process detection.
+It suspends until events arrive or the timeout expires, then returns `{"run_id", "seq", "events"}`. Every field comes from the event's file name — `<seq>--<subject>--<kind>--<status>.json` — so knowing what happened costs no body read. Pass the returned `seq` back as `--since` next time; reconnecting never replays.
 
-Liveness means the delegation's process is running, not that the current phase has finished — a PASS/FAIL/BLOCKED receipt still reports `alive` while the process lives. Without `--pid`, `_pi_running()` checks `ps -eo comm=` for any `pi` process; with concurrent delegations it cannot attribute one to a specific run, so a terminal phase may report `alive` while another delegation's pi runs. An unreadable process table yields `unknown` (exit 2) — never guessed from a receipt alone. With a dead process, `fp=...:RUNNING:...` means abandoned/crashed and `fp=...:PASS:...` a clean finish; both report `state=exited` — compare state to fp's status field.
+Without `--run-id` it watches the shared spool and reports run-level events, which is how you discover a run you did not start. `teamflow run` prints `run_id=` on stderr when it starts one.
 
-While `state=alive` and `fp` is unchanged, report nothing and spend no tokens. `activity` grows during a long phase and is not failure evidence.
+Kinds: `run_started`, `run_finished`, `handoff_opened`, `handoff_finished`, `artifact_written`, `runner_exited`.
 
-## Rung 2 — phase receipt (only when fp changed or state=exited)
+## Escalating
 
-```bash
-teamflow phase status --run-id <id>
-```
+Only when a `handoff_finished` status warrants a closer look:
 
-One small receipt, read only on a transition. `RUNNING` with `stale: true` is not failure. `BLOCKED` is the only stop signal — read its `block_reason`. At a phase boundary, confirm expected artifacts under `.teamflow/runs/` exist and are non-empty — never read bodies.
+- `teamflow handoff status --run-id <id> [--id <handoff-id>]` — one receipt, or every active handoff.
+- `teamflow agents list` — role, depth, heartbeat age, handoff, title, scope.
+- the enum fields of the event's `ref` or of `receipt.json` — never the prose around them.
 
-## Rung 3 — session summary (sparingly)
+Confirm an expected artifact under `.teamflow/runs/` by existence and non-emptiness. Do not read its body.
 
-```bash
-teamflow session list --format json
-```
+## Stop signals
 
-Bounded to the 10 newest files for the current working directory. Each entry: `id`, `model`, `provider`, `created`, `updated`, `message_count`. No message bodies, prompts, or responses. `--limit N` (N at most 10) lowers the count; above 10 is rejected.
+Exactly two:
+
+1. a handoff finished `BLOCKED` — read its `reason`;
+2. `runner_exited` arrived while the last business event was not terminal — the inner loop died without finishing.
+
+Nothing else stops the loop. Terminal silence and elapsed wall time are never failure evidence and must never terminate the inner loop. A long handoff reports `stale: true` past `TEAMFLOW_HANDOFF_TIMEOUT_SECONDS`; that is an age, not a verdict.
 
 ## Isolation
 
-Observation is read-only: never write, edit, or delete. Never read session files, prompts, reasoning, model responses, raw errors, or credentials.
-
-## Invariants
-
-- Poll at least 30 seconds apart.
-- Report only transitions. While unchanged, stay silent.
-- Terminal silence and elapsed time are never failure evidence.
+Observation is read-only: never write, edit, or delete. Never read session files, prompts, reasoning, model responses, raw provider errors, configuration, or credentials. `events/`, `state.json`, and `receipt.json` are the metadata plane built for you; everything else belongs to the inner loop.

@@ -114,10 +114,29 @@ else
   fail "source control-byte gate failed on README.md"
 fi
 
-if python3 .teamflow/skills/plan-change/scripts/phase_state.py --help >/dev/null; then
-  pass "code phase receipts are operational"
+if python3 .teamflow/skills/write-handoff/scripts/handoff_state.py handoff open --help >/dev/null; then
+  pass "handoff state CLI is operational"
 else
-  fail "code phase receipt helper is unavailable"
+  fail "handoff state CLI .teamflow/skills/write-handoff/scripts/handoff_state.py is unavailable"
+fi
+
+if python3 .teamflow/skills/observe-inner-loop/scripts/wait.py --help >/dev/null; then
+  pass "teamflow wait event listener is operational"
+else
+  fail "teamflow wait listener .teamflow/skills/observe-inner-loop/scripts/wait.py is unavailable"
+fi
+
+if python3 .teamflow/skills/observe-inner-loop/scripts/watchdog.py --help >/dev/null; then
+  pass "liveness watchdog is operational"
+else
+  fail "liveness watchdog .teamflow/skills/observe-inner-loop/scripts/watchdog.py is unavailable"
+fi
+
+# Transitional alias retained for one version while prompts migrate.
+if python3 .teamflow/skills/plan-change/scripts/phase_state.py --help >/dev/null; then
+  pass "transitional phase alias is operational"
+else
+  fail "transitional phase alias is unavailable"
 fi
 
 INHERITED_KIMI_API_KEY="${KIMI_API_KEY:-}"
@@ -201,6 +220,18 @@ else
   fail "task role-launcher extension .teamflow/extensions/teamflow-task/index.ts is missing"
 fi
 
+if [[ -f ".teamflow/extensions/teamflow-task/handoff-gate.ts" ]]; then
+  pass "delegation handoff-gate module is installed"
+else
+  fail "delegation gate module .teamflow/extensions/teamflow-task/handoff-gate.ts is missing"
+fi
+
+if [[ -f ".teamflow/extensions/agent-watchdog/index.ts" ]]; then
+  pass "agent-watchdog liveness extension is installed"
+else
+  fail "agent-watchdog extension .teamflow/extensions/agent-watchdog/index.ts is missing"
+fi
+
 if [[ -f ".teamflow/extensions/memory-context/index.ts" ]]; then
   pass "memory-context observation extension is installed"
 else
@@ -256,7 +287,7 @@ else
   fail ".teamflow/settings.json with compaction.enabled=false is missing"
 fi
 
-for agent in planner command coder test-writer test-runner supervisor emotional-salience-sensor memory-compressor memory-extractor memory-formatter memory-indexer; do
+for agent in planner command coder test-writer test-runner supervisor title-compressor emotional-salience-sensor memory-compressor memory-extractor memory-formatter memory-indexer; do
   if HOME="$DOCTOR_HOME" ./.teamflow/bin/teamflow debug agent "$agent" >/dev/null 2>&1; then
     pass "agent $agent is discoverable"
   else

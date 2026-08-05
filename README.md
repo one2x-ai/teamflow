@@ -19,6 +19,8 @@ Teamflow 是一个可持续迭代的多 Agent 编码工作流：GLM-5.2 负责�
 
 `planner` 是默认主 Agent，`coder`、`test-writer`、`test-runner` 等是受限子 Agent，在同一工作区顺序执行，不自动创建 worktree，不自动提交或推送。
 
+协作的基本单元是 **handoff**：一方把一部分业务连同目标、边界与验收标准移交给另一方，接收方自己维护该 handoff 的状态直至终态（`open → running → done(PASS|FAIL) | blocked(reason)`）。铁律是"状态变更与状态查询是程序式的，需求表达与任务编排走模型与提示词"：`teamflow handoff` CLI 独占状态迁移、序号分配、收据 schema 校验与事件投递；模型只写 handoff 正文、收据叙述字段与诊断，任何角色都不得手写 `state.json`、事件文件或 `active/` 哨兵。完整设计见 `docs/handoff-runtime-refactor-design.md`。
+
 ## 安装
 
 要求：macOS 或 Linux、Git、curl、Node.js 20+，以及 Kimi K3、MiMo、DeepSeek、智谱 GLM Coding Plan 的 API Key。
@@ -77,10 +79,12 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"   #
 ├── agents/           # planner / test-writer / test-runner / coder / command / supervisor / memory-*
 ├── skills/
 ├── bin/              # teamflow / memory / memory-capture / test-patch / server
-├── extensions/       # teamflow-task 委派扩展 + memory-context 上下文扩展
+├── extensions/       # teamflow-task 委派 + agent-watchdog 活性 + memory-context 上下文
 ├── experiments/bin/  # 显式调用的临时实验（memory-experiment、memory-compare）
 └── runs/             # 临时运行产物（不入 Git）
 ```
+
+`runs/code/<run-id>/` 下：`handoffs/<handoff-id>/`（`handoff.md`、`state.json`、`receipt.json`）、`active/`（进行中的哨兵，`ls` 即可回答"现在在干什么"）、`events/`（外层唯一监听面，文件名即元数据）、`tmp/`（先写后 rename，保证原子投递）、`liveness/`（watchdog 心跳）、`runner.json`；`runs/code/_spool/` 承载 run 级事件供跨 run 发现。
 
 全局 `teamflow` 命令定位当前 Git 项目后调用 `.teamflow/bin/teamflow`；包装器通过显式配置路径加载 Agents 与 Skills，业务根目录不需要任何 harness 配置。
 
@@ -92,14 +96,18 @@ teamflow command "列出当前分支"             # 明确命令式任务的快�
 teamflow debug agent [名称]                 # 查看 Agent 元数据
 teamflow debug skill                        # 列出已安装 Skill
 teamflow session list --format json         # 会话元数据概要（默认上限 10 条）
-teamflow phase status --run-id <id>         # 阶段回执；stale 只表示观察时间较长
-teamflow probe                              # 探测最近活跃运行（退出码 0=alive、1=exited、2=unknown）
+teamflow wait --run-id <id> --since <seq>   # 阻塞等待事件；超时返回空数组与 seq 水位
+teamflow handoff status --run-id <id>       # 单份收据，或全部活跃 handoff
+teamflow agents list                        # 谁在做什么：角色、depth、心跳年龄、标题、scope
+teamflow probe                              # 单行人工诊断（退出码 0=alive、1=exited、2=unknown）
 teamflow source-check                       # 拒绝源码中的非打印控制字节
 ```
 
-测试由 test-writer 生成统一补丁到 `.teamflow/runs/test-patches/`；`teamflow test-patch check` 校验后由 coder 用 `teamflow test-patch apply` 机械应用。
+`teamflow run` 分配并导出 `TEAMFLOW_RUN_ID`，在 stderr 打印一行 `teamflow run_id=... run_dir=... handoff_id=...`，外层不再靠目录 mtime 猜运行。`teamflow phase` 作为过渡别名保留一个版本。
 
-明确的 provider 超时、认证失败、额度不足、overload、传输失败或用户取消必须结束当前阶段并返回真实的 `BLOCKED`，不能折叠为空结果或静默重试。外层协调只观察元数据：先用 `teamflow probe`，再按需 `teamflow phase status` 与 `teamflow session list`，不读会话文件、prompt、response 或凭证，也不因终端静默终止内层运行（见 `.teamflow/skills/observe-inner-loop/`）。
+测试由 test-writer 生成统一补丁到 `.teamflow/runs/test-patches/`；`teamflow test-patch check` 校验后由 coder 用 `teamflow test-patch apply` 机械应用。被委派的 `PASS`/`FAIL` 必须附带通过 schema 校验的收据文件（`teamflow handoff finish --receipt <file>`）；最终 assistant 文本不是收据。
+
+明确的 provider 超时、认证失败、额度不足、overload、传输失败或用户取消必须把该 handoff 结束为真实的 `BLOCKED`，不能折叠为空结果或静默重试；`blocked.reason` 是单一枚举：`CONTEXT_BUDGET_EXCEEDED`、`RECALL_BUDGET_EXCEEDED`、`DELEGATION_ARTIFACT_MISSING`、`OUTPUT_TRUNCATED`、`PROVIDER_FAILURE`、`USER_CANCELLED`。外层协调只观察元数据：一次阻塞的 `teamflow wait`，必要时升级到 `teamflow handoff status` 或 `teamflow agents list`，不读会话文件、prompt、response 或凭证。停机信号只有两个——handoff 结束为 `BLOCKED`，以及 `runner_exited` 出现而其前最后一个业务事件不是终态；终端静默与墙钟时间都不是失败（见 `.teamflow/skills/observe-inner-loop/`）。
 
 ## 模型配置
 
@@ -109,6 +117,7 @@ teamflow source-check                       # 拒绝源码中的非打印控制�
 | `test-runner` | MiMo 2.5 Pro | 只执行测试并返回结构化回执；禁止修改文件 |
 | `coder` | Kimi K3 | 专注代码实现；禁止危险 Git 操作 |
 | `command` / `supervisor` | MiMo 2.5 Pro | 明确的 shell/Git 操作 / 机械性校验 |
+| `title-compressor` | MiMo 2.5 Pro | Goal 缺失或超长时异步压缩注册表标题；失败即降级 |
 
 记忆候选生成是串行管道：emotional-salience-sensor（MiMo 2.5 Pro）→ memory-compressor（DeepSeek）→ memory-extractor（GLM-5.2）→ memory-formatter（GLM-5.2）。Emotion 只提供注意力元数据，不进行心理诊断、不主动追问。
 
@@ -151,6 +160,8 @@ teamflow server [--host 127.0.0.1] [--port 7324] [--dir <仓库路径>]
 - `TEAMFLOW_MEMORY_HOME`：默认 `$TEAMFLOW_HOME/memory`
 - `TEAMFLOW_MEMORY_PROJECT`：默认 `teamflow`
 - `TEAMFLOW_MODEL_STAGE_TIMEOUT_SECONDS`：默认不设置（不启用本地 wall-time）
+- `TEAMFLOW_HANDOFF_TIMEOUT_SECONDS`：默认 600，只用于把长时间运行的 handoff 标记 `stale`（不是失败）
+- `TEAMFLOW_WAIT_BACKEND`：默认 `auto`（Linux 用 inotify，其他平台自动降级为轮询）
 - `TEAMFLOW_OPENCODE_URL` / `TEAMFLOW_OPENCODE_USERNAME` / `TEAMFLOW_OPENCODE_PASSWORD`：默认不设置（`/api/oc/*` 返回 503）
 
 ## 运行时产物与清理
@@ -212,6 +223,7 @@ docker run -e OPENCODE_SERVER_USERNAME=$OPENCODE_SERVER_USERNAME -e OPENCODE_SER
 
 ## 设计文档
 
+- `docs/handoff-runtime-refactor-design.md` — 内外 loop 通信从 phase 到 handoff 的重构设计
 - `docs/container-sidecar-deployment.md` — 单 Pod 双容器（OpenCode + Caddy sidecar）部署设计
 - `docs/teamflow-memory-context-design.md` — memory-context 扩展的上下文接管设计
 - `docs/teamflow-memory-forgetting-design.md` — 跨项目记忆的生命周期与遗忘机制设计

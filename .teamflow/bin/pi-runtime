@@ -30,6 +30,9 @@ WATCHDOG_EXTENSION_PATH = TEAMFLOW_DIR / "extensions" / "agent-watchdog" / "inde
 HANDOFF_SCRIPTS_DIR = TEAMFLOW_DIR / "skills" / "write-handoff" / "scripts"
 SESSION_LIMIT_CAP = 10
 
+# An installed runtime lives inside a business project; importing the shared
+# handoff module must not litter it with bytecode caches.
+sys.dont_write_bytecode = True
 sys.path.insert(0, str(HANDOFF_SCRIPTS_DIR))
 import handoff_state  # noqa: E402
 

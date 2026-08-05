@@ -353,6 +353,35 @@ class WaitSpoolDiscoveryTests(unittest.TestCase):
             self.assertEqual(payload["events"], [])
             self.assertEqual(completed.returncode, 0)
 
+    def test_waiting_creates_nothing(self):
+        """Observation is read-only, including the directory it watches."""
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = WaitFixture(Path(directory))
+            fixture.wait(run_id="run-does-not-exist", timeout="1")
+            self.assertEqual(
+                sorted(entry.name for entry in fixture.code.iterdir()),
+                [],
+                "wait must not create a run or spool directory",
+            )
+
+    def test_waiting_attaches_once_the_run_appears(self):
+        """Starting before the inner loop must still deliver its first event."""
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = WaitFixture(Path(directory))
+
+            def deliver():
+                time.sleep(0.6)
+                fixture.open_handoff()
+
+            worker = threading.Thread(target=deliver)
+            started = time.monotonic()
+            worker.start()
+            payload, _ = fixture.wait(timeout="20")
+            elapsed = time.monotonic() - started
+            worker.join()
+            self.assertEqual(len(payload["events"]), 1, payload)
+            self.assertLess(elapsed, 15)
+
 
 if __name__ == "__main__":
     unittest.main()

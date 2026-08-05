@@ -1,10 +1,15 @@
-"""Requirement tests for the outer-loop liveness probe (Part A).
+"""Requirement tests for the one-line run probe.
 
-The probe is a cheap, stdlib-only Python script that resolves the current
-phase receipt and prints exactly one line of metadata.  It is the cheapest
-rung on the observe-inner-loop escalation ladder: before spending tokens on
-``teamflow phase status`` or ``teamflow session list``, the outer loop can
-poll this single line.
+The probe is a cheap, stdlib-only Python script that resolves a run's
+current handoff receipt and prints exactly one line of metadata. Since the
+handoff refactor it is a *manual* diagnostic rather than a rung on a
+polling ladder — outer-loop observation is ``teamflow wait``, which blocks
+instead of polling — so its job is to answer "is this run alive, and what
+is it on?" in one line a human can read.
+
+Two facts it must respect: liveness comes from the process and never from a
+receipt's status, and when the run recorded its depth-0 pid the check is
+attributed to that pid instead of guessing from the process table.
 """
 
 import json
@@ -59,25 +64,60 @@ def clean_env(home):
     return env
 
 
-def _make_run_dir(tmp, run_id, status):
-    """Build a fixture run directory with current.json + a phase JSON."""
-    run_dir = tmp / run_id
-    phase_dir = run_dir / "phases"
-    phase_dir.mkdir(parents=True, exist_ok=True)
+#: The handoff statuses a receipt can hold, and the token the probe prints.
+HANDOFF_STATE = {
+    "RUNNING": {"status": "running"},
+    "PASS": {"status": "done", "result": "PASS"},
+    "FAIL": {"status": "done", "result": "FAIL"},
+    "BLOCKED": {"status": "blocked", "blocked": {"reason": "PROVIDER_FAILURE"}},
+}
 
-    phase_file = phase_dir / "p.json"
-    phase_file.write_text(
-        json.dumps({"phase": "p", "status": status, "started_at": "2026-01-01T00:00:00Z"}),
-        encoding="utf-8",
-    )
+
+def runs_dir(tmp):
+    """The runs directory, kept separate from the fixture's isolated HOME.
+
+    Discovery treats every subdirectory as a run, so an unrelated directory
+    sharing the parent would compete with the fixtures for "newest".
+    """
+    directory = tmp / "code"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def _make_run_dir(tmp, run_id, status, handoff_id="h00001-planner", runner_pid=None):
+    """Build a fixture run directory in the handoff layout.
+
+    An in-flight handoff also leaves an ``active/`` sentinel; a terminal one
+    does not, which is how the probe tells "on it" from "was on it".
+    """
+    run_dir = runs_dir(tmp) / run_id
+    handoff_dir = run_dir / "handoffs" / handoff_id
+    handoff_dir.mkdir(parents=True, exist_ok=True)
+
+    state = {
+        "schema_version": 2,
+        "run_id": run_id,
+        "handoff_id": handoff_id,
+        "role": "planner",
+        "depth": 0,
+        "opened_at": "2026-01-01T00:00:00Z",
+        **HANDOFF_STATE[status],
+    }
+    state_file = handoff_dir / "state.json"
+    state_file.write_text(json.dumps(state), encoding="utf-8")
     # Give the file a fresh mtime so activity is a small non-negative number.
-    os.utime(phase_file, None)
+    os.utime(state_file, None)
 
-    current = run_dir / "current.json"
-    current.write_text(
-        json.dumps({"phase": "p", "path": str(phase_file.resolve())}),
-        encoding="utf-8",
-    )
+    if state["status"] in ("open", "running"):
+        active = run_dir / "active"
+        active.mkdir(parents=True, exist_ok=True)
+        (active / handoff_id).write_text("", encoding="utf-8")
+
+    if runner_pid is not None:
+        (run_dir / "runner.json").write_text(
+            json.dumps({"run_id": run_id, "role": "planner", "pid": runner_pid}),
+            encoding="utf-8",
+        )
     return run_dir
 
 
@@ -89,7 +129,7 @@ def _run_probe(tmp, run_id, home, pid=None, pi_running=None):
     env var: ``None`` = unset (real ps check), ``"1"`` = force pi-present,
     ``"0"`` = force pi-absent.
     """
-    cmd = ["python3", str(PROBE), "--runs-dir", str(tmp)]
+    cmd = ["python3", str(PROBE), "--runs-dir", str(runs_dir(tmp))]
     if run_id is not None:
         cmd += ["--run-id", run_id]
     if pid is not None:
@@ -152,8 +192,8 @@ class ProbeOutputContractTests(unittest.TestCase):
             self.assertEqual(fields["state"], "alive")
             self.assertEqual(rc, 0, "alive must exit 0")
             self.assertTrue(
-                fields["fp"].startswith("p:RUNNING:"),
-                f"fp must start with 'p:RUNNING:', got {fields.get('fp')!r}",
+                fields["fp"].startswith("h00001-planner:RUNNING:"),
+                f"fp must start with the handoff id and status, got {fields.get('fp')!r}",
             )
             activity = fields["activity"]
             self.assertTrue(activity.endswith("s"), f"activity must end with 's', got {activity!r}")
@@ -231,15 +271,15 @@ class ProbeDiscoveryTests(unittest.TestCase):
             _make_run_dir(tmp, "beta", "RUNNING")
             # Make 'alpha' older so 'beta' is the newest.
             old = time.time() - 600
-            os.utime(tmp / "alpha", (old, old))
-            os.utime(tmp / "beta", None)
+            os.utime(runs_dir(tmp) / "alpha", (old, old))
+            os.utime(runs_dir(tmp) / "beta", None)
             out, rc = _run_probe(tmp, None, home, pi_running="1")
             fields = parse_line(out.strip())
             self.assertEqual(set(fields.keys()), ALLOWED_KEYS)
             self.assertEqual(fields["state"], "alive")
             # beta has phase 'p' status RUNNING; discovery should resolve it.
             self.assertTrue(
-                fields["fp"].startswith("p:RUNNING:"),
+                fields["fp"].startswith("h00001-planner:RUNNING:"),
                 f"discovery should resolve the newest run, got fp={fields.get('fp')!r}",
             )
             self.assertEqual(rc, 0)
@@ -267,12 +307,12 @@ class ProbeDiscoveryTests(unittest.TestCase):
             _make_run_dir(tmp, "beta", "PASS")
             # beta is newer, but we pin alpha.
             old = time.time() - 600
-            os.utime(tmp / "alpha", (old, old))
-            os.utime(tmp / "beta", None)
+            os.utime(runs_dir(tmp) / "alpha", (old, old))
+            os.utime(runs_dir(tmp) / "beta", None)
             out, rc = _run_probe(tmp, "alpha", home, pi_running="1")
             fields = parse_line(out.strip())
             self.assertEqual(fields["state"], "alive")
-            self.assertTrue(fields["fp"].startswith("p:RUNNING:"))
+            self.assertTrue(fields["fp"].startswith("h00001-planner:RUNNING:"))
             self.assertEqual(rc, 0)
 
 
@@ -355,7 +395,7 @@ class ProbePidFreeLivenessTests(unittest.TestCase):
             python_bin = shutil.which("python3")
             env["PATH"] = str(empty_bin)
             proc = subprocess.run(
-                [python_bin, str(PROBE), "--runs-dir", str(tmp),
+                [python_bin, str(PROBE), "--runs-dir", str(runs_dir(tmp)),
                  "--run-id", "rp6"],
                 cwd=str(ROOT),
                 stdin=subprocess.DEVNULL,
@@ -368,6 +408,86 @@ class ProbePidFreeLivenessTests(unittest.TestCase):
             fields = parse_line(out.strip())
             self.assertEqual(fields["state"], "unknown")
             self.assertEqual(proc.returncode, 2)
+
+
+class ProbeRunnerAttributionTests(unittest.TestCase):
+    """runner.json removes the guess: liveness is checked per run, not per host."""
+
+    def test_recorded_runner_pid_is_used_without_pid_flag(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            home = tmp / "home"
+            home.mkdir()
+            _make_run_dir(tmp, "ra1", "RUNNING", runner_pid=os.getpid())
+            # Force the process-table answer to the wrong value; the recorded
+            # pid must win, or a concurrent run could be mistaken for this one.
+            out, rc = _run_probe(tmp, "ra1", home, pi_running="0")
+            fields = parse_line(out.strip())
+            self.assertEqual(fields["state"], "alive")
+            self.assertEqual(rc, 0)
+
+    def test_dead_recorded_runner_pid_reports_exited(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            home = tmp / "home"
+            home.mkdir()
+            _make_run_dir(tmp, "ra2", "RUNNING", runner_pid=DEAD_PID)
+            out, rc = _run_probe(tmp, "ra2", home, pi_running="1")
+            fields = parse_line(out.strip())
+            self.assertEqual(fields["state"], "exited")
+            self.assertEqual(rc, 1)
+
+    def test_explicit_pid_still_overrides_the_recorded_one(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            home = tmp / "home"
+            home.mkdir()
+            _make_run_dir(tmp, "ra3", "RUNNING", runner_pid=DEAD_PID)
+            out, rc = _run_probe(tmp, "ra3", home, pid=os.getpid())
+            self.assertEqual(parse_line(out.strip())["state"], "alive")
+            self.assertEqual(rc, 0)
+
+
+class ProbeHandoffFingerprintTests(unittest.TestCase):
+    """The fingerprint follows the active handoff, not a single cursor."""
+
+    def test_active_handoff_is_preferred_over_a_finished_one(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            home = tmp / "home"
+            home.mkdir()
+            _make_run_dir(tmp, "fp1", "PASS", handoff_id="h00001-planner")
+            _make_run_dir(tmp, "fp1", "RUNNING", handoff_id="h00002-coder")
+            out, _ = _run_probe(tmp, "fp1", home, pi_running="1")
+            self.assertTrue(
+                parse_line(out.strip())["fp"].startswith("h00002-coder:RUNNING:"),
+                f"in-flight work must win: {out!r}",
+            )
+
+    def test_blocked_handoff_is_reported_in_the_fingerprint(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            home = tmp / "home"
+            home.mkdir()
+            _make_run_dir(tmp, "fp2", "BLOCKED")
+            out, _ = _run_probe(tmp, "fp2", home, pi_running="1")
+            self.assertIn(":BLOCKED:", parse_line(out.strip())["fp"])
+
+    def test_run_without_handoffs_is_unknown(self):
+        with tempfile.TemporaryDirectory() as td:
+            tmp = Path(td)
+            home = tmp / "home"
+            home.mkdir()
+            (runs_dir(tmp) / "empty-run").mkdir(parents=True)
+            out, rc = _run_probe(tmp, "empty-run", home)
+            self.assertEqual(parse_line(out.strip())["fp"], "-")
+            self.assertEqual(rc, 2)
+
+    def test_current_json_is_not_consulted(self):
+        """The retired single cursor must not come back as a fallback."""
+        source = PROBE.read_text(encoding="utf-8")
+        self.assertNotIn("current.json", source)
+        self.assertNotIn("phases", source)
 
 
 class ProbeExitCodeTests(unittest.TestCase):
@@ -413,7 +533,7 @@ class ProbeSubcommandTests(unittest.TestCase):
             env["TEAMFLOW_PROBE_PI_RUNNING"] = "1"
             proc = subprocess.run(
                 ["bash", str(TEAMFLOW_BIN), "probe",
-                 "--runs-dir", str(tmp), "--run-id", "sub1"],
+                 "--runs-dir", str(runs_dir(tmp)), "--run-id", "sub1"],
                 cwd=str(ROOT),
                 stdin=subprocess.DEVNULL,
                 stdout=subprocess.PIPE,

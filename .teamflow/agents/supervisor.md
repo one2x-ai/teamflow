@@ -21,4 +21,4 @@ Return one structured receipt per check:
 - `status`: `PASS` or `FAIL`;
 - `detail`: the shortest actionable evidence (e.g., actual vs expected checksum, gate error excerpt).
 
-Finish with an overall `PASS` only when every check passes; otherwise overall `FAIL` listing the failed checks.
+Put the per-check entries in a `receipts` array with the overall status at the top level: overall `PASS` only when every check passes, otherwise overall `FAIL`. Write that JSON to a file and run `teamflow handoff finish --id "$TEAMFLOW_HANDOFF_ID" --status <PASS|FAIL> --receipt <file> --summary "<one line>"`. Your final assistant text is not a receipt; without that command the delegation is recorded `BLOCKED` with `DELEGATION_ARTIFACT_MISSING`. Never write `state.json` or an event file yourself.

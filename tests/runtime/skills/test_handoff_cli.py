@@ -911,8 +911,7 @@ class ModelsMayNotWriteStateDirectlyTests(unittest.TestCase):
         self.assertIn("state.json", text)
         self.assertRegex(
             text,
-            r"(?i)never (hand-?write|write)[^.]*state\.json"
-            r"|(?i)do not (hand-?write|write)[^.]*state\.json",
+            r"(?i)(never|do not) (hand-?write|write)[^.]*state\.json",
             ".teamflow/AGENTS.md must forbid writing state files by hand",
         )
 

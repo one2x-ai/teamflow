@@ -127,13 +127,14 @@ def _watch_dir(runs_dir, run_id):
 def _open_inotify(directory, backend):
     """Return a watcher, or None to fall back to stat polling.
 
-    Unavailability degrades instead of failing: the caller's contract is
-    "one call, suspended until something happens", not "inotify".
+    Observation is read-only, so a directory that does not exist yet is not
+    created here — the loop polls until the inner loop makes it and attaches
+    a watch then. Unavailability degrades instead of failing: the caller's
+    contract is "one call, suspended until something happens", not "inotify".
     """
-    if backend == "poll":
+    if backend == "poll" or not directory.is_dir():
         return None
     try:
-        directory.mkdir(parents=True, exist_ok=True)
         return _Inotify(directory)
     except (OSError, AttributeError):
         return None
@@ -171,6 +172,9 @@ def main(argv):
                     watcher.wait(remaining)
                 else:
                     time.sleep(min(POLL_INTERVAL, remaining))
+                    # The directory may have just been created by the inner
+                    # loop; upgrade to a watch as soon as there is one.
+                    watcher = _open_inotify(directory, backend)
                 events, water_mark = _scan(directory, args.since, kinds)
         finally:
             if watcher is not None:
