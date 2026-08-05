@@ -63,6 +63,21 @@ if [[ "${1:-}" == "source-check" ]]; then
   exec python3 "$RUNTIME_DIR/skills/implement-change/scripts/source_safety.py" "$@"
 fi
 
+if [[ "${1:-}" == "handoff" ]]; then
+  exec python3 "$RUNTIME_DIR/skills/write-handoff/scripts/handoff_state.py" "$@"
+fi
+
+if [[ "${1:-}" == "agents" ]]; then
+  exec python3 "$RUNTIME_DIR/skills/write-handoff/scripts/handoff_state.py" "$@"
+fi
+
+if [[ "${1:-}" == "wait" ]]; then
+  shift
+  exec python3 "$RUNTIME_DIR/skills/observe-inner-loop/scripts/wait.py" "$@"
+fi
+
+# Transitional alias: `phase` keeps working for one version while agent
+# prompts migrate to `handoff`.
 if [[ "${1:-}" == "phase" ]]; then
   shift
   exec python3 "$RUNTIME_DIR/skills/plan-change/scripts/phase_state.py" "$@"

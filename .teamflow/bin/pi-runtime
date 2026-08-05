@@ -6,15 +6,19 @@ Maps Teamflow roles to real ``pi`` argv, and provides local ``debug`` and
 directory computed relative to this file so it works with an isolated HOME.
 
 Subcommands:
-  run --agent ROLE PROMPT... [--print]
+  run --agent ROLE PROMPT... [--print] [--handoff-file PATH]
   debug agent [NAME]
   debug skill
   session list [--format json] [--limit N | -n N]
 """
 
+import contextlib
+import io
 import json
 import os
+import secrets
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 TEAMFLOW_DIR = Path(__file__).resolve().parents[1]
@@ -22,7 +26,31 @@ AGENTS_DIR = TEAMFLOW_DIR / "agents"
 SKILLS_DIR = TEAMFLOW_DIR / "skills"
 TASK_EXTENSION_PATH = TEAMFLOW_DIR / "extensions" / "teamflow-task" / "index.ts"
 MEMORY_CONTEXT_EXTENSION_PATH = TEAMFLOW_DIR / "extensions" / "memory-context" / "index.ts"
+WATCHDOG_EXTENSION_PATH = TEAMFLOW_DIR / "extensions" / "agent-watchdog" / "index.ts"
+HANDOFF_SCRIPTS_DIR = TEAMFLOW_DIR / "skills" / "write-handoff" / "scripts"
 SESSION_LIMIT_CAP = 10
+
+sys.path.insert(0, str(HANDOFF_SCRIPTS_DIR))
+import handoff_state  # noqa: E402
+
+
+def _new_run_id():
+    """Sortable, lowercase, filesystem- and event-filename-safe."""
+    stamp = datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
+    return f"run-{stamp}-{secrets.token_hex(2)}"
+
+
+def _handoff_cli(argv):
+    """Call the handoff CLI in-process, keeping its stdout off our stream."""
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        code = handoff_state.main(argv)
+    if code != 0:
+        return None
+    try:
+        return json.loads(buffer.getvalue() or "{}")
+    except ValueError:
+        return None
 
 
 def _fail(message):
@@ -83,6 +111,7 @@ def _resolve_role(role):
 def cmd_run(args):
     role = None
     print_only = False
+    handoff_file = None
     prompt_tokens = []
     i = 0
     while i < len(args):
@@ -92,6 +121,11 @@ def cmd_run(args):
             if i >= len(args):
                 return _fail("--agent requires a role name")
             role = args[i]
+        elif token == "--handoff-file":
+            i += 1
+            if i >= len(args):
+                return _fail("--handoff-file requires a path")
+            handoff_file = args[i]
         elif token == "--print":
             print_only = True
         else:
@@ -106,6 +140,51 @@ def cmd_run(args):
     if entry is None:
         return _fail(f"unknown role: {role}")
 
+    # A nested invocation stays inside the run that already exists; only a
+    # fresh depth-0 start allocates a run-id and announces itself.
+    run_id = os.environ.get("TEAMFLOW_RUN_ID")
+    fresh_run = run_id is None
+    if fresh_run:
+        run_id = _new_run_id()
+
+    runs_dir = os.environ.get("TEAMFLOW_RUNS_DIR", handoff_state.DEFAULT_RUNS_DIR)
+    handoff_id = os.environ.get("TEAMFLOW_HANDOFF_ID")
+    if handoff_file:
+        body = Path(handoff_file)
+        if not body.is_file():
+            return _fail(f"handoff body not found: {handoff_file}")
+        opened = _handoff_cli(
+            [
+                "handoff", "open",
+                "--run-id", run_id,
+                "--runs-dir", runs_dir,
+                "--role", role,
+                "--depth", "0",
+                "--body-file", str(body),
+            ]
+        )
+        if opened is None:
+            return _fail(f"could not register the root handoff from {handoff_file}")
+        handoff_id = opened["handoff_id"]
+
+    if fresh_run:
+        _handoff_cli(
+            [
+                "handoff", "run-start",
+                "--run-id", run_id,
+                "--runs-dir", runs_dir,
+                "--role", role,
+                "--pid", str(os.getpid()),
+            ]
+        )
+
+    print(
+        f"teamflow run_id={run_id} "
+        f"run_dir={Path(runs_dir) / run_id} "
+        f"handoff_id={handoff_id or '-'}",
+        file=sys.stderr,
+    )
+
     argv = [
         "pi",
         "-p", prompt,
@@ -115,6 +194,7 @@ def cmd_run(args):
         "--system-prompt", str(entry["system_prompt"]),
         "--extension", str(TASK_EXTENSION_PATH),
         "--extension", str(MEMORY_CONTEXT_EXTENSION_PATH),
+        "--extension", str(WATCHDOG_EXTENSION_PATH),
         "--no-context-files",
     ]
     if entry["tools"]:
@@ -122,7 +202,10 @@ def cmd_run(args):
     role_env = {
         "TEAMFLOW_AGENT_ROLE": role,
         "TEAMFLOW_AGENT_DEPTH": "0",
+        "TEAMFLOW_RUN_ID": run_id,
     }
+    if handoff_id:
+        role_env["TEAMFLOW_HANDOFF_ID"] = handoff_id
 
     if print_only:
         payload = {
