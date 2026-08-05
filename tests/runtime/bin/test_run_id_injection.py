@@ -107,6 +107,33 @@ class RunIdAllocationTests(unittest.TestCase):
                 payload["env"]["TEAMFLOW_RUN_ID"], "run-20260101-000000-abcd"
             )
 
+    def test_fresh_run_assigns_depth_zero(self):
+        """A fresh top-level run (no inherited TEAMFLOW_RUN_ID) runs at depth 0."""
+        with tempfile.TemporaryDirectory() as directory:
+            project, home = self._project(Path(directory))
+            completed = run_print(project, home)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            payload = json.loads(completed.stdout)
+            self.assertEqual(
+                payload["env"]["TEAMFLOW_AGENT_DEPTH"], "0",
+                "a fresh top-level runner must start at depth 0",
+            )
+
+    def test_nested_run_assigns_depth_one(self):
+        """A run started inside an existing run (inherited TEAMFLOW_RUN_ID) is an
+        auxiliary helper and must run at depth 1 so its exit never emits a
+        run-level runner_exited stop signal."""
+        with tempfile.TemporaryDirectory() as directory:
+            project, home = self._project(Path(directory))
+            completed = run_print(
+                project, home, env_overrides={"TEAMFLOW_RUN_ID": "run-20260101-000000-abcd"}
+            )
+            payload = json.loads(completed.stdout)
+            self.assertEqual(
+                payload["env"]["TEAMFLOW_AGENT_DEPTH"], "1",
+                "an auxiliary agent spawned inside a run must be depth 1",
+            )
+
     def test_machine_readable_line_is_printed_on_stderr(self):
         """stdout carries the pi JSON stream, so the receipt line goes to stderr."""
         with tempfile.TemporaryDirectory() as directory:

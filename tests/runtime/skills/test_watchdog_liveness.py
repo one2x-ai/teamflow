@@ -29,6 +29,9 @@ ROOT = Path(__file__).resolve().parents[3]
 WATCHDOG = (
     ROOT / ".teamflow" / "skills" / "observe-inner-loop" / "scripts" / "watchdog.py"
 )
+HANDOFF_STATE = (
+    ROOT / ".teamflow" / "skills" / "write-handoff" / "scripts" / "handoff_state.py"
+)
 
 RUN_ID = "run-20260101-000000-bbbb"
 DEADLINE = 25.0
@@ -258,6 +261,63 @@ class ExitDetectionTests(unittest.TestCase):
             self.fixture.event_kinds(),
             [],
             "the parent delegation already observes a child's exit",
+        )
+
+    def test_auxiliary_agent_exit_is_not_a_live_runner(self):
+        """An auxiliary depth-1 agent (e.g. title-compressor) that exits must
+        neither publish runner_exited nor appear as a live/depth-0 runner in
+        the coordination board, so a short-lived helper can never emit a false
+        stop signal for the outer loop."""
+        pid = self.fixture.start_monitored()
+        self.fixture.start_watchdog(pid, role="title-compressor", depth=1)
+        wait_until(
+            lambda: self.fixture.record(pid, role="title-compressor", depth=1)
+        )
+        self._kill_and_wait(pid)
+        exited = wait_until(
+            lambda: (
+                value
+                if (value := self.fixture.record(pid, role="title-compressor", depth=1))
+                and value["status"] == "exited"
+                else None
+            )
+        )
+        self.assertIsNotNone(exited, "the exit must still be recorded in liveness/")
+
+        # (a) a depth-1 exit must never reach the business event stream.
+        self.assertEqual(
+            self.fixture.event_kinds(),
+            [],
+            "an auxiliary agent's exit must not emit runner_exited",
+        )
+
+        # (b) the pid must not surface as a live or depth-0 runner.
+        completed = subprocess.run(
+            [
+                "python3", str(HANDOFF_STATE),
+                "agents", "list",
+                "--run-id", RUN_ID,
+                "--runs-dir", str(self.fixture.code),
+                "--format", "json",
+            ],
+            cwd=str(self.fixture.root),
+            env=clean_env(self.fixture.home),
+            capture_output=True,
+            text=True,
+            timeout=25,
+            stdin=subprocess.DEVNULL,
+        )
+        self.assertEqual(completed.returncode, 0, completed.stderr)
+        rows = json.loads(completed.stdout)
+        live = [
+            row
+            for row in rows
+            if row.get("pid") == pid
+            and (row.get("status") == "alive" or row.get("depth") == 0)
+        ]
+        self.assertEqual(
+            live, [],
+            "a depth-1 auxiliary agent must not appear as a live/depth-0 runner",
         )
 
     def test_watchdog_exits_after_the_monitored_process(self):

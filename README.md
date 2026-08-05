@@ -23,7 +23,7 @@ Teamflow 是一个可持续迭代的多 Agent 编码工作流：GLM-5.2 负责�
 
 ## 安装
 
-要求：macOS 或 Linux、Git、curl、Node.js 20+，以及 Kimi K3、MiMo、DeepSeek、智谱 GLM Coding Plan 的 API Key。
+要求：macOS 或 Linux、Git、curl、Node.js 22.19+，以及 Kimi K3、MiMo、DeepSeek、智谱 GLM Coding Plan 的 API Key。
 
 ```bash
 git clone git@github.com:wenshiqi0/teamflow.git
@@ -118,6 +118,7 @@ teamflow source-check                       # 拒绝源码中的非打印控制�
 | `coder` | Kimi K3 | 专注代码实现；禁止危险 Git 操作 |
 | `command` / `supervisor` | MiMo 2.5 Pro | 明确的 shell/Git 操作 / 机械性校验 |
 | `title-compressor` | MiMo 2.5 Pro | Goal 缺失或超长时异步压缩注册表标题；失败即降级 |
+| `memory-indexer` | MiMo 2.5 Pro | 为冷存储 TurnBlock 生成 TurnIndex XML；不修改产品代码或 Basic Memory |
 
 记忆候选生成是串行管道：emotional-salience-sensor（MiMo 2.5 Pro）→ memory-compressor（DeepSeek）→ memory-extractor（GLM-5.2）→ memory-formatter（GLM-5.2）。Emotion 只提供注意力元数据，不进行心理诊断、不主动追问。
 
@@ -182,6 +183,8 @@ python -m pytest tests                 # 全部 Python 测试（含 tests/runtim
 bun test ./.teamflow/extensions/       # 扩展纯逻辑测试
 cd server && bun test                  # server 全部测试
 ```
+
+server 测试从环境读取代理设置（不强制 proxy），需先 `bun install` 安装依赖。
 
 ## 维护与诊断
 

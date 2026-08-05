@@ -93,7 +93,7 @@ for this repository's CLI-only coding workflow.
 EOF
   printf '\nUpstream ref: %s\n' "$REF"
   printf 'Upstream snapshots: %s\n' "$UPSTREAM_DIR"
-  printf 'Local targets: %s\n' "$ROOT_DIR/.teamflow/skills/memory-{notes,capture,continue,curate}/SKILL.md"
+  printf 'Local targets: %s\n' "$ROOT_DIR/.teamflow/skills/memory-{notes,capture,recall,curate}/SKILL.md"
   printf 'CLI adapter: %s\n' "$ROOT_DIR/.teamflow/skills/basic-memory-cli/SKILL.md"
   printf '\nAdditional intent:\n%s\n' "$INSTRUCTION"
   cat <<'EOF'
@@ -143,12 +143,12 @@ fi
 
 if [[ "$APPLY" == true ]]; then
   if rg -n '\bMCP\b|search_notes\(|write_note\(|read_note\(|build_context\(|recent_activity\(|list_memory_projects\(' \
-    .teamflow/skills/memory-{notes,capture,continue,curate}/SKILL.md; then
+    .teamflow/skills/memory-{notes,capture,recall,curate}/SKILL.md; then
     echo "error: CLI-only validation found forbidden upstream syntax" >&2
     exit 1
   fi
 
-  node - .teamflow/skills/memory-{notes,capture,continue,curate}/SKILL.md <<'NODE'
+  node - .teamflow/skills/memory-{notes,capture,recall,curate}/SKILL.md <<'NODE'
 const fs = require("node:fs");
 const path = require("node:path");
 for (const file of process.argv.slice(2)) {

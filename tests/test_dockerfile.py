@@ -374,6 +374,25 @@ class RequiredRuntimeFilesTests(unittest.TestCase):
             "Dockerfile must install basic-memory (via uv)",
         )
 
+    def test_installs_github_cli(self):
+        """Dockerfile installs the GitHub CLI (gh) in the runtime stage.
+
+        Debian upstream has no ``gh`` package, so the Dockerfile must add
+        the official GitHub apt repository (``cli.github.com``) and install
+        ``gh`` from it.
+        """
+        self.assertIn(
+            "cli.github.com",
+            self.text,
+            "Dockerfile must add the GitHub CLI apt repository (cli.github.com)",
+        )
+        joined = _join_continuations(self.text)
+        self.assertRegex(
+            joined,
+            r"apt-get\s+install\b[^\n]*\bgh\b",
+            "Dockerfile must apt-get install gh",
+        )
+
     def test_installs_pinned_official_bun_in_final_runtime(self):
         final_stage = re.split(r"(?im)^\s*FROM\s+", self.text)[-1]
         self.assertRegex(

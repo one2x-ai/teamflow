@@ -39,6 +39,14 @@ def _read_readme():
     return README.read_text(encoding="utf-8")
 
 
+def read_shared_rules():
+    """Return .teamflow/AGENTS.md text; fail if missing."""
+    path = ROOT / ".teamflow" / "AGENTS.md"
+    if not path.exists():
+        raise AssertionError(f".teamflow/AGENTS.md not found at {path}")
+    return path.read_text(encoding="utf-8")
+
+
 # ---------------------------------------------------------------------------
 # C1 — README conciseness
 # ---------------------------------------------------------------------------
@@ -262,6 +270,85 @@ class DeploymentDocContentTests(unittest.TestCase):
         self.assertTrue(
             "volume" in lower or "挂载" in self.text,
             "Doc must document volume / mount guidance for standalone use",
+        )
+
+
+# ---------------------------------------------------------------------------
+# C7 — README model table lists memory-indexer (P1-2)
+# ---------------------------------------------------------------------------
+
+
+class ReadmeModelTableTests(unittest.TestCase):
+    """P1-2: README model table must list the memory-indexer agent."""
+
+    def setUp(self):
+        self.text = _read_readme()
+
+    def test_readme_lists_memory_indexer(self):
+        self.assertIn(
+            "memory-indexer",
+            self.text,
+            "README model table must list the memory-indexer agent "
+            "(model mimo/mimo-v2.5-pro)",
+        )
+
+
+# ---------------------------------------------------------------------------
+# C8 — README testing section documents server-test proxy + deps (P2-8)
+# ---------------------------------------------------------------------------
+
+
+class ReadmeServerTestNotesTests(unittest.TestCase):
+    """P2-8: README testing section must note server-test proxy & deps.
+
+    Server tests read proxy settings from the environment (no forced proxy)
+    and require dependencies installed.
+
+    Pinned tokens: the English word ``proxy`` (the codebase uses HTTP_PROXY
+    env vars) and ``bun install`` for the dependency requirement.
+    """
+
+    def setUp(self):
+        self.text = _read_readme().lower()
+
+    def test_readme_notes_proxy_for_server_tests(self):
+        self.assertIn(
+            "proxy",
+            self.text,
+            "README testing section must note that server tests read proxy "
+            "settings from the environment (no forced proxy)",
+        )
+
+    def test_readme_notes_server_test_dependencies(self):
+        self.assertIn(
+            "bun install",
+            self.text,
+            "README testing section must note that server tests require "
+            "dependencies installed (bun install)",
+        )
+
+
+# ---------------------------------------------------------------------------
+# C9 — scope conflicts persisted structurally in state.json (P2-5)
+# ---------------------------------------------------------------------------
+
+
+class ScopeConflictsDocNoteTests(unittest.TestCase):
+    """P2-5: scope conflicts must be persisted structurally, not only printed.
+
+    Pinned token: ``scope_conflicts`` must appear in README.md or
+    ``.teamflow/AGENTS.md``, documenting that scope conflicts are persisted
+    in ``state.json`` rather than only printed to stdout.
+    """
+
+    def test_scope_conflicts_documented(self):
+        combined = _read_readme() + "\n" + read_shared_rules()
+        self.assertIn(
+            "scope_conflicts",
+            combined,
+            "README.md or .teamflow/AGENTS.md must document that scope "
+            "conflicts are persisted structurally in state.json (token "
+            "'scope_conflicts'), not only printed to stdout",
         )
 
 

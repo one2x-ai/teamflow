@@ -10,6 +10,8 @@ This working repository uses Teamflow's test-first multi-agent process.
 - `coder` uses Kimi K3, focuses on the smallest coherent product-code implementation, and must not redefine acceptance criteria.
 - `command` uses MiMo 2.5 Pro for explicit shell, Git, and GitHub operations that require no code edits or multi-agent planning.
 - `supervisor` uses MiMo 2.5 Pro for deterministic mechanical checks — artifact existence, checksums, and test-patch gates — without editing files or delegating.
+- `title-compressor` uses MiMo 2.5 Pro to compress a delegation into one registry title line; failures degrade gracefully and never block the run.
+- `memory-indexer` uses MiMo 2.5 Pro to generate TurnIndex XML for cold-stored TurnBlocks without modifying product code or Basic Memory.
 - `emotional-salience-sensor`, `memory-compressor`, `memory-extractor`, and `memory-formatter` form the serial capture pipeline; GLM-5.2 owns both extraction and final formatting. Models write only below `.teamflow/runs/memory/`; deterministic apply writes safe new notes and defers update/supersede proposals.
 
 Only depth-0 roles with the strict boolean frontmatter declaration `delegates: true` may receive `task` and `task_group`. Child roles always run at depth 1 and may never delegate further. Roles that declare `needs_project_rules: false` (such as `test-runner` and `command`) skip AGENTS.md injection; they receive only their own system prompt and the handoff message.
@@ -40,7 +42,7 @@ Coordination happens in handoffs: one unit of work moved from a delegator to a r
 State changes and state queries are programmatic; requirement expression and orchestration go through models and prompts. The two planes have a hard boundary:
 
 - `teamflow handoff open/start/finish/status/list` owns every transition (`open` -> `running` -> `done(PASS|FAIL)` or `blocked(reason)`), sequence allocation, receipt schema validation, and event delivery. Delegating through `task`/`task_group` opens the handoff for you.
-- Models write handoff bodies, receipt narrative fields, and diagnoses. Never hand-write `state.json`, an event file, an `active/` sentinel, or a liveness record, and never claim liveness in prose. State that depends on an agent remembering to write it is a defect.
+- Models write handoff bodies, receipt narrative fields, and diagnoses. Never hand-write `state.json`, an event file, an `active/` sentinel, or a liveness record, and never claim liveness in prose. State that depends on an agent remembering to write it is a defect. Scope conflicts are persisted structurally as `scope_conflicts` in `state.json`, not only printed to stdout.
 
 A delegated `PASS` or `FAIL` requires a validated receipt file: `teamflow handoff finish --id "$TEAMFLOW_HANDOFF_ID" --status <STATUS> --receipt <file> --summary "<one line>"`. A final assistant message is not a receipt. `BLOCKED` needs no receipt file because the reason enum is the receipt.
 
@@ -66,7 +68,7 @@ An outer coordinator that watches this inner loop must load `observe-inner-loop`
 - Escalate only on a status that warrants it: `teamflow handoff status --run-id <id> [--id <handoff-id>]` for one receipt or every active handoff, and `teamflow agents list` for who is doing what.
 - Confirm progress by testing existence and non-emptiness of expected paths under `.teamflow/runs/`; do not read artifact bodies.
 - Never read session files, prompts, reasoning, model responses, raw provider errors, configuration, or credentials.
-- There are exactly two stop signals: a handoff finished `BLOCKED`, and `runner_exited` arriving while the last business event is not terminal. A running handoff reporting `stale: true` past `TEAMFLOW_HANDOFF_TIMEOUT_SECONDS` is an age, not a failure.
+- There are exactly two stop signals: a handoff finished `BLOCKED`, and `runner_exited` arriving while the last business event is not terminal. Only the depth-0 main runner's exit emits `runner_exited`; auxiliary/short-lived agents (e.g. title-compressor) do not produce a stop signal. A running handoff reporting `stale: true` past `TEAMFLOW_HANDOFF_TIMEOUT_SECONDS` is an age, not a failure.
 - Terminal silence and elapsed wall time alone are never failure evidence and must not terminate the inner loop.
 
 ## Shared memory

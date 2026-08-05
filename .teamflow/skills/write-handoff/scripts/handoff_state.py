@@ -407,6 +407,7 @@ def cmd_handoff_open(args, paths):
             "split_scope": args.split_scope,
         },
         "opened_at": _now(),
+        "scope_conflicts": conflicts,
     }
     write_json_atomic(paths.state_path(handoff_id), state)
 
@@ -492,6 +493,18 @@ def cmd_handoff_start(args, paths):
     return 0
 
 
+RECEIPT_FIELD_TYPES = {
+    "next_owner": str,
+    "error_excerpt": str,
+    "diagnosis": str,
+    "command": str,
+    "reproduction": str,
+    "failed_checks": list,
+    "exit_code": int,
+    "expected_red": bool,
+}
+
+
 def _validate_receipt_entry(entry, role, index, paths, handoff_id, spills):
     if not isinstance(entry, dict):
         raise CliError(f"receipt entry {index} must be a JSON object")
@@ -507,8 +520,12 @@ def _validate_receipt_entry(entry, role, index, paths, handoff_id, spills):
             f"receipt entry {index} status must be one of "
             f"{', '.join(TERMINAL_STATUSES)}, got {entry['status']!r}"
         )
-    if "exit_code" in entry and not isinstance(entry["exit_code"], int):
-        raise CliError(f"receipt entry {index} exit_code must be an integer")
+    for field, expected in RECEIPT_FIELD_TYPES.items():
+        if field in entry and not isinstance(entry[field], expected):
+            raise CliError(
+                f"receipt entry {index} field {field} must be "
+                f"{expected.__name__}, got {type(entry[field]).__name__}"
+            )
     excerpt = entry.get("error_excerpt")
     if isinstance(excerpt, str) and len(excerpt) > ERROR_EXCERPT_LIMIT:
         relative = f"evidence/{paths.run_id}/{handoff_id}-{index}-error.txt"
