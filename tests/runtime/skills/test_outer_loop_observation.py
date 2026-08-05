@@ -250,5 +250,33 @@ class InstallAndDoctorWiringTests(unittest.TestCase):
         self.assertNotIn("outer-loop-monitor", read(SKILL))
 
 
+class AuxiliaryAgentExitNoteTests(unittest.TestCase):
+    """P0: docs must state auxiliary agents do not emit runner_exited.
+
+    Only the depth-0 main runner's exit emits ``runner_exited``; auxiliary /
+    short-lived agents (e.g. title-compressor) do not produce a stop signal.
+
+    Pinned token: the word ``auxiliary`` must co-occur with ``runner_exited``
+    in README.md or .teamflow/AGENTS.md.
+    """
+
+    def test_auxiliary_exit_note_documented(self):
+        candidates = (
+            read(ROOT / "README.md"),
+            read(SHARED_RULES),
+        )
+        found = any(
+            "runner_exited" in text and "auxiliary" in text.lower()
+            for text in candidates
+        )
+        self.assertTrue(
+            found,
+            "README.md or .teamflow/AGENTS.md must document that only the "
+            "depth-0 main runner's exit emits runner_exited; "
+            "auxiliary/short-lived agents (e.g. title-compressor) do not "
+            "produce a stop signal (pinned token: 'auxiliary')",
+        )
+
+
 if __name__ == "__main__":
     unittest.main()

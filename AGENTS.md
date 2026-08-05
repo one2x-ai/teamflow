@@ -15,7 +15,10 @@ Narrow exceptions: writing or correcting the handoff itself; reverting a bad cha
 - `test-runner` owns test execution and structured failure receipts without file edits.
 - `coder` uses Kimi K3, focuses on product-code implementation, and must not redefine the acceptance criteria.
 - `command` uses MiMo 2.5 Pro for explicit shell, Git, and GitHub operations that need semantic interpretation but no code edits or multi-agent planning.
-- `memory-compressor`, `memory-extractor`, and `memory-formatter` form the curated serial memory pipeline; GLM-5.2 owns both extraction and final formatting. Models may write only below `.teamflow/runs/memory/` and must never write Basic Memory directly.
+- `supervisor` uses MiMo 2.5 Pro for deterministic mechanical checks — artifact existence, checksums, and test-patch gates — without editing files or delegating.
+- `title-compressor` uses MiMo 2.5 Pro to compress a delegation into one registry title line; failures degrade gracefully and never block the run.
+- `memory-indexer` uses MiMo 2.5 Pro to generate TurnIndex XML for cold-stored TurnBlocks without modifying product code or Basic Memory.
+- `emotional-salience-sensor`, `memory-compressor`, `memory-extractor`, and `memory-formatter` form the curated serial memory pipeline; the sensor uses MiMo 2.5 Pro and GLM-5.2 owns both extraction and final formatting. Models may write only below `.teamflow/runs/memory/` and must never write Basic Memory directly.
 
 Only depth-0 roles with the strict boolean frontmatter declaration `delegates: true` may receive `task` and `task_group`. Child roles always run at depth 1 and may never delegate further.
 

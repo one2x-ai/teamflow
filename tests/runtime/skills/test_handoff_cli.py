@@ -426,6 +426,37 @@ class HandoffOpenTests(unittest.TestCase):
             )
             self.assertEqual(payload["scope_conflicts"], [])
 
+    # P2-5: scope conflicts are persisted in state.json, not only stdout.
+    def test_overlapping_scope_is_persisted_in_state(self):
+        """`teamflow handoff status --id` must see the conflict later."""
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = HandoffFixture(Path(directory))
+            fixture.open_handoff(role="coder")
+            second = fixture.open_handoff(role="test-writer")
+            state = fixture.state(second["handoff_id"])
+            self.assertIn("scope_conflicts", state)
+            conflicts = state["scope_conflicts"]
+            self.assertIsInstance(conflicts, list)
+            self.assertTrue(
+                conflicts,
+                "an overlapping scope must be persisted as a conflict entry",
+            )
+            self.assertIn(
+                ".teamflow/skills/write-handoff/scripts/handoff_state.py",
+                conflicts,
+            )
+
+    def test_disjoint_scope_persists_empty_conflict_list(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = HandoffFixture(Path(directory))
+            opened = fixture.open_handoff(
+                role="test-writer",
+                body="- Goal: other work.\n- Scope: server/src/other.ts\n",
+            )
+            state = fixture.state(opened["handoff_id"])
+            self.assertIn("scope_conflicts", state)
+            self.assertEqual(state["scope_conflicts"], [])
+
 
 class HandoffLifecycleTests(unittest.TestCase):
     """S2.3: open -> running -> done(PASS|FAIL) | blocked(reason)."""
@@ -624,6 +655,94 @@ class ReceiptSchemaTests(unittest.TestCase):
                 completed.returncode, 0,
                 "the second batch entry has no exit_code and must be rejected",
             )
+
+    # P2-4: optional receipt fields are type-validated when present, but no
+    # new required field is added for non-test-runner roles beyond `status`.
+    def _open_coder_child(self, fixture):
+        """A depth>0 delegated child whose receipts are validated against role coder."""
+        parent = fixture.open_handoff(role="planner")
+        return fixture.open_handoff(
+            role="coder", extra=("--parent-id", parent["handoff_id"])
+        )
+
+    def test_coder_receipt_next_owner_wrong_type_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = HandoffFixture(Path(directory))
+            child = self._open_coder_child(fixture)
+            completed = self._finish_with(
+                fixture, child["handoff_id"], {"status": "FAIL", "next_owner": 42}
+            )
+            self.assertNotEqual(
+                completed.returncode, 0,
+                "a non-string next_owner must be rejected at finish time",
+            )
+            self.assertIn("next_owner", completed.stderr)
+
+    def test_coder_receipt_error_excerpt_wrong_type_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = HandoffFixture(Path(directory))
+            child = self._open_coder_child(fixture)
+            completed = self._finish_with(
+                fixture, child["handoff_id"],
+                {"status": "FAIL", "error_excerpt": 123},
+            )
+            self.assertNotEqual(
+                completed.returncode, 0,
+                "a non-string error_excerpt must be rejected at finish time",
+            )
+            self.assertIn("error_excerpt", completed.stderr)
+
+    def test_coder_receipt_diagnosis_wrong_type_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = HandoffFixture(Path(directory))
+            child = self._open_coder_child(fixture)
+            completed = self._finish_with(
+                fixture, child["handoff_id"],
+                {"status": "FAIL", "diagnosis": ["x"]},
+            )
+            self.assertNotEqual(
+                completed.returncode, 0,
+                "a non-string diagnosis must be rejected at finish time",
+            )
+            self.assertIn("diagnosis", completed.stderr)
+
+    def test_coder_receipt_failed_checks_wrong_type_is_rejected(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = HandoffFixture(Path(directory))
+            child = self._open_coder_child(fixture)
+            completed = self._finish_with(
+                fixture, child["handoff_id"],
+                {"status": "FAIL", "failed_checks": "not-a-list"},
+            )
+            self.assertNotEqual(
+                completed.returncode, 0,
+                "a non-list failed_checks must be rejected at finish time",
+            )
+            self.assertIn("failed_checks", completed.stderr)
+
+    def test_non_runner_pass_receipt_with_only_status_is_accepted(self):
+        """Backward-compat guard: status is still the only required field."""
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = HandoffFixture(Path(directory))
+            child = self._open_coder_child(fixture)
+            completed = self._finish_with(
+                fixture, child["handoff_id"], {"status": "PASS"}, status="PASS"
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+    def test_non_runner_fail_receipt_with_valid_string_types_is_accepted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            fixture = HandoffFixture(Path(directory))
+            child = self._open_coder_child(fixture)
+            completed = self._finish_with(
+                fixture, child["handoff_id"],
+                {
+                    "status": "FAIL",
+                    "next_owner": "coder",
+                    "diagnosis": "missing behavior",
+                },
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
 
 
 class EventProtocolTests(unittest.TestCase):

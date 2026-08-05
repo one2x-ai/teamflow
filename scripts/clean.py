@@ -11,6 +11,10 @@ terminal status, the run's events/, tmp/, and liveness/ directories are
 regenerable bookkeeping that nobody will read again. A run still in flight
 keeps all three, because deleting the sequence counter or a sentinel under a
 live process would corrupt its state.
+
+Python bytecode caches under .teamflow/ are regenerable build scratch and go
+too. The scan never leaves .teamflow/: caches elsewhere in the repository and
+under the user's home directory (shared memory) always survive.
 """
 
 import argparse
@@ -86,6 +90,14 @@ def main() -> None:
 
     directories = [runs / name for name in DISPOSABLE_DIRECTORIES]
     directories.extend(_finished_run_scratch(runs))
+    # Python bytecode caches anywhere below .teamflow/ are regenerable; the
+    # rglob stays scoped to .teamflow/ so caches outside it are never touched.
+    directories.extend(
+        sorted(
+            candidate for candidate in (args.root.resolve() / ".teamflow").rglob("__pycache__")
+            if candidate.is_dir()
+        )
+    )
     for directory in directories:
         if directory.is_dir():
             print(f"{verb} {directory}")

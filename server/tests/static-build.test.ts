@@ -3,23 +3,16 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { createFixture, httpGetRaw, freePort, type Fixture } from "./helpers";
+import { buildEnv } from "./build-env";
 
 const SERVER = join(import.meta.dir, "..");
 const WEB = join(SERVER, "web");
 const DIST = join(WEB, "dist");
 
-// Build env explicitly includes proxy so `bun install` can reach the registry.
-const buildEnv: Record<string, string> = {
-  ...(process.env as Record<string, string>),
-  HTTP_PROXY: "http://127.0.0.1:1087",
-  HTTPS_PROXY: "http://127.0.0.1:1087",
-  ALL_PROXY: "socks5://127.0.0.1:1080",
-};
-
 function runBuild(): void {
   spawnSync("bun", ["run", "build"], {
     cwd: SERVER,
-    env: buildEnv,
+    env: buildEnv(),
     timeout: 300_000,
   });
 }
@@ -148,7 +141,7 @@ describe("Typecheck", () => {
     }
     const result = spawnSync("bun", ["run", "typecheck"], {
       cwd: SERVER,
-      env: buildEnv,
+      env: buildEnv(),
       timeout: 120_000,
     });
     expect(result.status).toBe(0);

@@ -204,7 +204,7 @@ def cmd_run(args):
         argv += ["--tools", ",".join(entry["tools"])]
     role_env = {
         "TEAMFLOW_AGENT_ROLE": role,
-        "TEAMFLOW_AGENT_DEPTH": "0",
+        "TEAMFLOW_AGENT_DEPTH": "0" if fresh_run else "1",
         "TEAMFLOW_RUN_ID": run_id,
     }
     if handoff_id:

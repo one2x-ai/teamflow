@@ -17,6 +17,9 @@ Contracts:
 
 import os
 import re
+import subprocess
+import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -212,6 +215,77 @@ class CleanScriptTests(unittest.TestCase):
 
     def test_scopes_to_teamflow_runs(self):
         self.assertRegex(self.text, r'"\.teamflow"\s*/\s*"runs"|\.teamflow.*runs')
+
+    # remove __pycache__ directories under .teamflow/
+
+    def _make_pycache(self, base, *parts):
+        """Create a __pycache__ dir holding a dummy .pyc under base/parts."""
+        cache = base.joinpath(*parts, "__pycache__")
+        cache.mkdir(parents=True)
+        (cache / "module.cpython-311.pyc").write_bytes(b"\x00\x00\x00\x00")
+        return cache
+
+    def _run_clean(self, root, *extra):
+        return subprocess.run(
+            [sys.executable, str(SCRIPTS / "clean.py"), "--root", str(root), *extra],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_removes_pycache_under_bin(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".teamflow" / "runs").mkdir(parents=True)
+            cache = self._make_pycache(root, ".teamflow", "bin")
+            self._run_clean(root)
+            self.assertFalse(
+                cache.exists(),
+                "clean.py must remove .teamflow/bin/__pycache__",
+            )
+
+    def test_removes_nested_pycache_under_skills(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".teamflow" / "runs").mkdir(parents=True)
+            cache = self._make_pycache(
+                root, ".teamflow", "skills", "write-handoff", "scripts"
+            )
+            self._run_clean(root)
+            self.assertFalse(
+                cache.exists(),
+                "clean.py must remove nested .teamflow __pycache__ dirs",
+            )
+
+    def test_dry_run_keeps_pycache(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".teamflow" / "runs").mkdir(parents=True)
+            cache = self._make_pycache(root, ".teamflow", "bin")
+            result = self._run_clean(root, "--dry-run")
+            self.assertTrue(cache.exists(), "--dry-run must not delete __pycache__")
+            self.assertIn("would remove", result.stdout)
+
+    def test_pycache_outside_teamflow_survives(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".teamflow" / "runs").mkdir(parents=True)
+            outside = self._make_pycache(root, "elsewhere")
+            self._run_clean(root)
+            self.assertTrue(
+                outside.exists(),
+                "clean.py must not touch __pycache__ outside .teamflow/",
+            )
+
+    def test_pycache_removal_preserves_runs_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / ".teamflow" / "runs").mkdir(parents=True)
+            cache = self._make_pycache(root, ".teamflow", "bin")
+            evidence = root / ".teamflow" / "runs" / "receipt.json"
+            evidence.write_text("{}")
+            self._run_clean(root)
+            self.assertFalse(cache.exists(), "__pycache__ should be removed")
+            self.assertTrue(evidence.exists(), "runs/ evidence must survive")
 
 
 if __name__ == "__main__":

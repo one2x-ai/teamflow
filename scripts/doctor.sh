@@ -34,10 +34,14 @@ fi
 
 if command -v node >/dev/null 2>&1; then
   NODE_MAJOR="$(node -p 'process.versions.node.split(".")[0]')"
-  if (( NODE_MAJOR >= 20 )); then
+  if (( NODE_MAJOR >= 22 )) && node -e '
+    const [major, minor, patch] = process.versions.node.split(".").map(Number);
+    const ok = major > 22 || (major === 22 && (minor > 19 || (minor === 19 && patch >= 0)));
+    process.exit(ok ? 0 : 1);
+  '; then
     pass "node $(node --version)"
   else
-    fail "Node.js 20+ is required; found $(node --version)"
+    fail "Node.js 22.19+ is required; found $(node --version)"
   fi
 else
   fail "node is not installed"
