@@ -149,6 +149,42 @@ class WriteHandoffSelfCheckTests(unittest.TestCase):
         self.assertIn("install", text.lower(), "must reference install.sh build mistake")
 
 
+class WriteHandoffCliConfluenceTests(unittest.TestCase):
+    """The skill owns the body; the CLI owns the state. Both must be said."""
+
+    def setUp(self):
+        self.text = read(WRITE_HANDOFF)
+
+    def test_skill_names_the_registering_command(self):
+        self.assertIn("teamflow handoff open", self.text)
+        self.assertIn("teamflow handoff finish", self.text)
+
+    def test_skill_forbids_hand_written_state(self):
+        self.assertRegex(
+            self.text,
+            r"(?i)(never|do not) hand-?write",
+            "an agent that can hand-write state can desynchronize it",
+        )
+        self.assertIn("state.json", self.text)
+
+    def test_goal_is_documented_as_the_registry_title(self):
+        self.assertRegex(
+            self.text,
+            r"(?i)registry title",
+            "the Goal line doubles as the board title, which is why it is one line",
+        )
+        self.assertIn("80", self.text, "the title budget must be stated")
+
+    def test_scope_is_documented_as_paths_for_conflict_detection(self):
+        lowered = self.text.lower()
+        self.assertIn("overlap", lowered)
+        self.assertIn(
+            "paths",
+            lowered,
+            "scope must be paths, or the CLI cannot intersect it across handoffs",
+        )
+
+
 class WriteHandoffEnvTrapsTests(unittest.TestCase):
     """write-handoff must carry environment traps into Constraints."""
 
@@ -196,10 +232,12 @@ class DiscoverabilityTests(unittest.TestCase):
 
 
 # ---------------------------------------------------------------------------
-# Part B — observe-inner-loop rewrite
+# Part B — observe-inner-loop: one blocking call, no ladder
 # ---------------------------------------------------------------------------
 
-class ObserveInnerLoopRewriteTests(unittest.TestCase):
+class ObserveInnerLoopContractTests(unittest.TestCase):
+    """Observation is a single blocking wait, and the skill must say so."""
+
     def test_skill_under_3000_bytes(self):
         size = len(read(OBSERVE_SKILL).encode("utf-8"))
         self.assertLess(
@@ -207,59 +245,38 @@ class ObserveInnerLoopRewriteTests(unittest.TestCase):
             f"observe-inner-loop SKILL.md must stay under 3000 bytes, got {size}",
         )
 
-    def test_leads_with_liveness_probe(self):
+    def test_leads_with_the_blocking_listener(self):
         text = read(OBSERVE_SKILL)
-        self.assertTrue(
-            "probe" in text.lower(),
-            "must mention the probe script",
-        )
-        self.assertTrue(
-            "scripts/probe.py" in text or "probe" in text,
-            "must reference the probe script path scripts/probe.py or probe",
-        )
+        self.assertIn("teamflow wait", text)
+        self.assertIn("--since", text, "reconnecting must be idempotent")
 
-    def test_has_escalation_ladder(self):
-        text = read(OBSERVE_SKILL).lower()
-        # Rung 1: probe
-        self.assertIn("probe", text)
-        # Rung 2+: phase status / phase receipt
-        self.assertTrue(
-            "phase status" in text or "phase receipt" in text,
-            "escalation ladder must reference phase status or phase receipt",
+    def test_escalation_is_conditional_not_a_fixed_ladder(self):
+        text = read(OBSERVE_SKILL)
+        self.assertIn("teamflow handoff status", text)
+        self.assertIn("artifact", text.lower())
+        self.assertNotIn(
+            "Rung 1",
+            text,
+            "the ranked polling ladder is retired along with polling itself",
         )
-        # Artifact existence at a phase boundary
-        self.assertIn("artifact", text)
 
     def test_invariants_present(self):
         text = read(OBSERVE_SKILL)
-        self.assertIn("30", text)
         self.assertIn("stale", text)
         self.assertIn("BLOCKED", text)
+        self.assertIn("runner_exited", text)
         self.assertTrue(
             "silence" in text.lower(),
             "must mention silence",
         )
 
-    def test_probe_is_the_first_rung(self):
+    def test_unchanged_state_is_documented_as_free(self):
         text = read(OBSERVE_SKILL).lower()
-        r1 = text.find("rung 1")
-        r2 = text.find("rung 2")
-        self.assertGreater(r1, -1, "must have a Rung 1")
-        self.assertGreater(r2, -1, "must have a Rung 2")
-        self.assertLess(r1, r2, "liveness probe must be Rung 1, before the phase receipt")
-        self.assertIn("probe", text[r1:r2], "Rung 1 must be the liveness probe")
-
-    def test_reports_nothing_while_alive_and_unchanged(self):
-        text = read(OBSERVE_SKILL).lower()
-        self.assertIn("report nothing", text,
-                      "skill must instruct reporting nothing while alive-and-unchanged")
-        self.assertIn("unchanged", text)
-
-    def test_each_rung_names_cost(self):
-        text = read(OBSERVE_SKILL).lower()
-        for rung in ("rung 1", "rung 2", "rung 3"):
-            self.assertIn(rung, text, f"escalation ladder must define {rung}")
-        self.assertIn("cost", text, "escalation ladder must name the cost of escalating")
+        self.assertRegex(
+            text,
+            r"costs? (you )?nothing|zero",
+            "the skill must state that an unchanged inner loop costs nothing",
+        )
 
 
 # ---------------------------------------------------------------------------

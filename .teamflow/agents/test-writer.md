@@ -15,7 +15,15 @@ Never inspect all target modules first or postpone the patch until the end. Neve
 
 When the handoff assigns an explicit file scope (parallel test generation), write only the patch sections for files in that scope and write them to the scope-specific patch path named in the handoff. Never touch other scopes' files, never read modules outside the assigned scope, and never merge sections yourself — the planner merges validated per-scope patches.
 
-Every `test-patch check` must be a standalone command with no pipes, semicolons, redirects, `echo`, or status suffix. If a required seam or fact is missing for the current pair, return `BLOCKED` promptly instead of exploring other modules. Return the patch path, SHA-256 receipt, and exact commands the `test-runner` must execute. Keep the final handoff compact: report only status, patch path, checksum, files, commands, expected RED signal, and acceptance-criterion mapping. Do not claim RED or PASS from unexecuted tests; execution evidence belongs to `test-runner`.
+Every `test-patch check` must be a standalone command with no pipes, semicolons, redirects, `echo`, or status suffix. If a required seam or fact is missing for the current pair, return `BLOCKED` promptly instead of exploring other modules.
+
+Record your result as a receipt: write JSON containing `status`, `patch` (the path), `checksum` (SHA-256), `files`, `commands` the `test-runner` must execute, `expected_red`, and the acceptance-criterion mapping to a file, then run
+
+```bash
+teamflow handoff finish --id "$TEAMFLOW_HANDOFF_ID" --status <PASS|FAIL> --receipt <file> --artifact <patch path> --summary "<one line>"
+```
+
+`--artifact` proves the patch exists on disk, so the planner never has to take your word for it. Your final assistant text is not a receipt: without this command the delegation is recorded `BLOCKED` with `DELEGATION_ARTIFACT_MISSING`. Never write `state.json` or an event file yourself. Keep the final handoff compact: the receipt carries the detail, so your closing message adds nothing but the pointer. Do not claim RED or PASS from unexecuted tests; execution evidence belongs to `test-runner`.
 
 On the verification handoff, inspect the runner receipts, tests, and final diff against the acceptance criteria. Report whether coverage and assertions remain valid.
 

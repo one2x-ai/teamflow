@@ -55,6 +55,8 @@ FILES=(
   ".teamflow/bin/test-patch"
   ".teamflow/bin/server"
   ".teamflow/extensions/teamflow-task/index.ts"
+  ".teamflow/extensions/teamflow-task/handoff-gate.ts"
+  ".teamflow/extensions/agent-watchdog/index.ts"
   ".teamflow/extensions/memory-context/index.ts"
   ".teamflow/extensions/memory-context/turn-block.ts"
   ".teamflow/extensions/memory-context/cold-memory-store.ts"

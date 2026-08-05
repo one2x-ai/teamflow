@@ -1,11 +1,15 @@
 """Requirement tests for the outer-loop observation contract.
 
 The outer loop (an external coordinator that is not doing the work) must be
-able to detect the inner loop's execution path accurately while spending as
-few tokens as possible. Two artifacts encode that contract:
+able to detect the inner loop's execution accurately while spending as few
+tokens as possible. The polling ladder it used to climb cost a tool call and
+a result on every tick even when nothing had changed, and broke the outer
+loop's KV cache each time; observation is now one blocking call.
+
+Two artifacts encode the contract:
 
 1. ``.teamflow/skills/observe-inner-loop/SKILL.md`` — an installable skill
-   that lists the exact metadata-only commands and the polling discipline.
+   naming the exact metadata-only commands and the two stop signals.
 2. ``.teamflow/AGENTS.md`` — a shared-constraints section telling the outer
    loop to use that skill and forbidding session/prompt/response reads.
 
@@ -13,7 +17,6 @@ The retired SQLite session monitor must stay retired: the skill may never
 reach into session files, prompts, reasoning, responses, or credentials.
 """
 
-import re
 import unittest
 from pathlib import Path
 
@@ -22,6 +25,15 @@ ROOT = Path(__file__).resolve().parents[3]
 SKILL = ROOT / ".teamflow" / "skills" / "observe-inner-loop" / "SKILL.md"
 SHARED_RULES = ROOT / ".teamflow" / "AGENTS.md"
 DOCTOR = ROOT / "scripts" / "doctor.sh"
+
+EVENT_KINDS = (
+    "run_started",
+    "run_finished",
+    "handoff_opened",
+    "handoff_finished",
+    "artifact_written",
+    "runner_exited",
+)
 
 
 def read(path: Path) -> str:
@@ -43,15 +55,22 @@ class ObserveInnerLoopSkillTests(unittest.TestCase):
         self.assertRegex(text, r"(?m)^name:\s*observe-inner-loop\s*$")
         self.assertRegex(text, r"(?m)^description:\s*\S")
 
-    def test_skill_lists_phase_status_command(self):
+    def test_skill_leads_with_the_blocking_wait_command(self):
         text = read(SKILL)
-        self.assertIn("teamflow phase status", text)
+        self.assertIn("teamflow wait", text)
         self.assertIn("--run-id", text)
+        self.assertIn("--since", text)
 
-    def test_skill_lists_session_list_json_command(self):
+    def test_skill_documents_the_handoff_status_escalation(self):
         text = read(SKILL)
-        self.assertIn("teamflow session list", text)
-        self.assertIn("--format json", text)
+        self.assertIn("teamflow handoff status", text)
+        self.assertIn("teamflow agents list", text)
+
+    def test_skill_names_every_event_kind(self):
+        text = read(SKILL)
+        for kind in EVENT_KINDS:
+            with self.subTest(kind=kind):
+                self.assertIn(kind, text)
 
     def test_skill_documents_artifact_existence_checks(self):
         text = read(SKILL)
@@ -70,32 +89,62 @@ class ObserveInnerLoopSkillTests(unittest.TestCase):
         self.assertIn("BLOCKED", text)
         self.assertIn("stale", text)
 
+    def test_skill_names_both_stop_signals(self):
+        text = read(SKILL)
+        self.assertIn("runner_exited", text)
+        self.assertRegex(
+            text,
+            r"(?i)exactly two",
+            "the skill must state that there are exactly two stop signals, so "
+            "nothing else terminates the inner loop",
+        )
+
 
 class OuterLoopTokenEfficiencyTests(unittest.TestCase):
-    """The outer loop must observe cheaply: metadata only, bounded polling."""
+    """The outer loop must observe cheaply: metadata only, no polling."""
 
     def test_skill_forbids_reading_full_artifact_bodies(self):
         text = read(SKILL)
         self.assertRegex(
             text,
-            r"do not read|never read",
+            r"do not read|never read|Do not read",
             "skill must forbid reading artifact bodies",
         )
 
-    def test_skill_prescribes_bounded_polling_interval(self):
-        text = read(SKILL)
+    def test_skill_states_that_an_unchanged_inner_loop_is_free(self):
+        text = read(SKILL).lower()
         self.assertRegex(
             text,
-            r"\b\d+\s*(second|s\b|minute)",
-            "skill must prescribe a concrete polling interval",
+            r"costs? (you )?nothing|zero",
+            "the skill must state that no change costs no tokens",
         )
 
-    def test_skill_forbids_re_polling_unchanged_state(self):
+    def test_skill_retires_the_polling_ladder(self):
+        """A polling interval is a contradiction once the call blocks."""
+        text = read(SKILL).lower()
+        self.assertRegex(
+            text,
+            r"never a poll|not a poll|instead of polling|blocks instead",
+            "the skill must say observation blocks rather than polls",
+        )
+        self.assertNotIn(
+            "every 30 seconds",
+            text,
+            "a fixed polling interval must not survive the blocking listener",
+        )
+        self.assertNotIn(
+            "teamflow phase status",
+            read(SKILL),
+            "the retired phase surface must not be the escalation path",
+        )
+
+    def test_filename_carries_the_metadata(self):
         text = read(SKILL)
         self.assertRegex(
             text,
-            r"unchanged|same status|has not changed",
-            "skill must avoid re-reporting unchanged state",
+            r"<seq>--<subject>--<kind>--<status>",
+            "the skill must show that the file name answers the question, so a "
+            "body read is the exception",
         )
 
     def test_skill_is_compact(self):
@@ -160,10 +209,10 @@ class SharedRulesOuterLoopSectionTests(unittest.TestCase):
     def test_shared_rules_reference_the_skill_by_name(self):
         self.assertIn("observe-inner-loop", read(SHARED_RULES))
 
-    def test_shared_rules_name_the_two_metadata_commands(self):
+    def test_shared_rules_name_the_metadata_commands(self):
         text = read(SHARED_RULES)
-        self.assertIn("teamflow phase status", text)
-        self.assertIn("teamflow session list", text)
+        self.assertIn("teamflow wait", text)
+        self.assertIn("teamflow handoff status", text)
 
     def test_shared_rules_forbid_session_and_prompt_reads(self):
         text = read(SHARED_RULES)
@@ -177,12 +226,20 @@ class SharedRulesOuterLoopSectionTests(unittest.TestCase):
         text = read(SHARED_RULES)
         self.assertRegex(text, r"[Ss]ilence")
 
+    def test_shared_rules_name_both_stop_signals(self):
+        text = read(SHARED_RULES)
+        self.assertIn("runner_exited", text)
+        self.assertIn("BLOCKED", text)
+
 
 class InstallAndDoctorWiringTests(unittest.TestCase):
     """The skill ships with the installer and doctor verifies it."""
 
     def test_doctor_checks_observe_inner_loop_skill(self):
         self.assertIn("observe-inner-loop", read(DOCTOR))
+
+    def test_doctor_checks_the_wait_listener(self):
+        self.assertIn("wait.py", read(DOCTOR))
 
     def test_retired_sqlite_monitor_stays_retired(self):
         """The old session-file monitor must not come back with this skill."""

@@ -172,12 +172,17 @@ class OuterLoopMonitorRemovedFromDocsTests(unittest.TestCase):
                 self.assertNotIn("outer-loop-monitor", source)
                 self.assertNotIn("opencode.db", source)
 
-    def test_docs_keep_metadata_only_phase_and_session_observation(self):
+    def test_docs_keep_metadata_only_event_observation(self):
+        """Observation is still metadata-only; the surface is now the event stream.
+
+        ``teamflow wait`` replaced the polling ladder, so requiring the old
+        ``teamflow phase status`` here would pin a retired contract.
+        """
         for path, label in ((README_MD, "README.md"), (AGENTS_MD, "AGENTS.md")):
             source = read(path)
             with self.subTest(doc=label):
-                self.assertIn("teamflow phase", source)
-                self.assertIn("teamflow session list", source)
+                self.assertIn("teamflow wait", source)
+                self.assertIn("teamflow handoff status", source)
 
 
 class ExperimentsRemainInstalledAndCheckedTests(unittest.TestCase):

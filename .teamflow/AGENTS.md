@@ -35,7 +35,16 @@ For command-only requests such as branch creation, committing an already-reviewe
 
 ## Handoff contract
 
-A structured handoff is required for every delegation; author it with the `write-handoff` skill. Do not hand off vague requests.
+Coordination happens in handoffs: one unit of work moved from a delegator to a receiver, whose state the receiver maintains until a terminal status. A structured handoff is required for every delegation; author the body with the `write-handoff` skill. Do not hand off vague requests.
+
+State changes and state queries are programmatic; requirement expression and orchestration go through models and prompts. The two planes have a hard boundary:
+
+- `teamflow handoff open/start/finish/status/list` owns every transition (`open` -> `running` -> `done(PASS|FAIL)` or `blocked(reason)`), sequence allocation, receipt schema validation, and event delivery. Delegating through `task`/`task_group` opens the handoff for you.
+- Models write handoff bodies, receipt narrative fields, and diagnoses. Never hand-write `state.json`, an event file, an `active/` sentinel, or a liveness record, and never claim liveness in prose. State that depends on an agent remembering to write it is a defect.
+
+A delegated `PASS` or `FAIL` requires a validated receipt file: `teamflow handoff finish --id "$TEAMFLOW_HANDOFF_ID" --status <STATUS> --receipt <file> --summary "<one line>"`. A final assistant message is not a receipt. `BLOCKED` needs no receipt file because the reason enum is the receipt.
+
+`blocked.reason` is one enum: `CONTEXT_BUDGET_EXCEEDED`, `RECALL_BUDGET_EXCEEDED`, `DELEGATION_ARTIFACT_MISSING`, `OUTPUT_TRUNCATED`, `PROVIDER_FAILURE`, `USER_CANCELLED`. Pass `--blocked-reason` more than once when more than one applies.
 
 ## Engineering rules
 
@@ -45,19 +54,19 @@ A structured handoff is required for every delegation; author it with the `write
 - Run focused checks before broader lint, typecheck, test, and build gates.
 - Do not push, force-reset, or clean the workspace without explicit authorization.
 - Put temporary teamflow run artifacts below `.teamflow/runs/`.
-- Wrap delegated code phases with `teamflow phase start/finish`; explicit provider timeout, authentication, quota, overload, transport failure, and user cancellation are `BLOCKED`, not implicit retries of the full Teamflow process. There is no local wall-time timeout by default, so silence while a provider queues is not failure evidence.
-- A delegated response ending with `finish=length` is output truncation, not a successful empty handoff. If its mandatory artifact is absent, finish the phase as `BLOCKED` with the truncation and missing-artifact reasons; do not silently retry inside the same phase.
+- Explicit provider timeout, authentication failure, quota exhaustion, overload, transport failure, and user cancellation finish a handoff `BLOCKED`; they are never implicit retries of the full Teamflow process. There is no local wall-time timeout by default, so silence while a provider queues is not failure evidence.
+- A delegated response ending with `finish=length` is output truncation, not a successful empty handoff. When its mandatory artifact is absent the delegation is recorded `BLOCKED` with both the truncation and missing-artifact reasons; do not silently retry inside the same handoff.
 - Run `teamflow source-check` after implementation edits and before test execution.
 
 ## Outer loop observation
 
 An outer coordinator that watches this inner loop must load `observe-inner-loop` and observe metadata only. It is not doing the work, so it must not pay for the inner loop's context.
 
-- Detect the execution path with `teamflow phase status --run-id <id>` (add `--phase <name>` for history) and `teamflow session list --format json`.
+- Observe with one blocking call: `teamflow wait --run-id <id> --since <seq>`. It returns when events arrive or the timeout expires, so an unchanged inner loop costs nothing and there is no polling interval to tune. Omit `--run-id` to discover runs from the shared spool.
+- Escalate only on a status that warrants it: `teamflow handoff status --run-id <id> [--id <handoff-id>]` for one receipt or every active handoff, and `teamflow agents list` for who is doing what.
 - Confirm progress by testing existence and non-emptiness of expected paths under `.teamflow/runs/`; do not read artifact bodies.
 - Never read session files, prompts, reasoning, model responses, raw provider errors, configuration, or credentials.
-- `RUNNING` with `stale: true` means observation time exceeded `TEAMFLOW_PHASE_TIMEOUT_SECONDS`; it is not a failure. `BLOCKED` is the only stop signal.
-- Poll at most every 30 seconds, report only status or phase transitions, and stay silent while state is unchanged.
+- There are exactly two stop signals: a handoff finished `BLOCKED`, and `runner_exited` arriving while the last business event is not terminal. A running handoff reporting `stale: true` past `TEAMFLOW_HANDOFF_TIMEOUT_SECONDS` is an age, not a failure.
 - Terminal silence and elapsed wall time alone are never failure evidence and must not terminate the inner loop.
 
 ## Shared memory

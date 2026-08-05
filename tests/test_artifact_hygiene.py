@@ -252,6 +252,77 @@ class CleanRemovesDisposableArtifactsTests(unittest.TestCase):
                 keep.is_file(), "verified receipts must survive cleaning"
             )
 
+    def _run_tree(self, project: Path, run_id: str, *, finished: bool):
+        """Build one run with the coordination scratch clean.py reasons about."""
+        run = project / ".teamflow" / "runs" / "code" / run_id
+        handoff = run / "handoffs" / "h00001-planner"
+        handoff.mkdir(parents=True)
+        state = {
+            "handoff_id": "h00001-planner",
+            "run_id": run_id,
+            "lineage": {"parent_handoff_id": None},
+            "status": "done" if finished else "running",
+        }
+        if finished:
+            state["result"] = "PASS"
+        (handoff / "state.json").write_text(json.dumps(state), encoding="utf-8")
+        (handoff / "receipt.json").write_text('{"status": "PASS"}', encoding="utf-8")
+        for name in ("events", "tmp", "liveness"):
+            (run / name).mkdir()
+        (run / "events" / "00001--h00001-planner--handoff_opened--OPEN.json").write_text(
+            "{}", encoding="utf-8"
+        )
+        if not finished:
+            (run / "active").mkdir()
+            (run / "active" / "h00001-planner").write_text("", encoding="utf-8")
+        return run
+
+    def test_clean_removes_scratch_of_a_finished_run(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            run = self._run_tree(project, "run-done", finished=True)
+            subprocess.run(
+                ["python3", str(CLEAN), "--root", str(project)],
+                capture_output=True, text=True, check=True,
+            )
+            for name in ("events", "tmp", "liveness"):
+                with self.subTest(directory=name):
+                    self.assertFalse(
+                        (run / name).exists(),
+                        f"{name}/ is regenerable once the run is finished",
+                    )
+            self.assertTrue(
+                (run / "handoffs" / "h00001-planner" / "receipt.json").is_file(),
+                "handoff receipts are evidence and must survive cleaning",
+            )
+            self.assertTrue((run / "handoffs" / "h00001-planner" / "state.json").is_file())
+
+    def test_clean_preserves_scratch_of_a_running_run(self):
+        """Deleting a live run's counters or sentinels would corrupt its state."""
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            run = self._run_tree(project, "run-live", finished=False)
+            subprocess.run(
+                ["python3", str(CLEAN), "--root", str(project)],
+                capture_output=True, text=True, check=True,
+            )
+            for name in ("events", "tmp", "liveness", "active"):
+                with self.subTest(directory=name):
+                    self.assertTrue(
+                        (run / name).exists(),
+                        f"{name}/ must survive while the run is in flight",
+                    )
+
+    def test_clean_dry_run_preserves_finished_run_scratch(self):
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            run = self._run_tree(project, "run-done", finished=True)
+            subprocess.run(
+                ["python3", str(CLEAN), "--root", str(project), "--dry-run"],
+                capture_output=True, text=True, check=True,
+            )
+            self.assertTrue((run / "events").is_dir(), "--dry-run must not delete")
+
     def test_clean_dry_run_changes_nothing(self):
         with tempfile.TemporaryDirectory() as directory:
             project = Path(directory)

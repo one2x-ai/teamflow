@@ -10,26 +10,155 @@
  * "<provider>/<model>", while `description`, `tools`, and the strict boolean
  * `delegates` permission are optional. The Markdown agent files are the sole
  * source of truth for role identity.
+ *
+ * Every delegation is also a handoff. Before the child starts, the prompt is
+ * registered as `handoffs/<id>/handoff.md` and the id is injected into the
+ * child's environment so the child can write its own receipt through
+ * `teamflow handoff finish`. Afterwards this extension checks mechanically
+ * that a terminal receipt landed; when it did not, it records `blocked` with
+ * the observable reasons rather than retrying. The tool's return value is a
+ * pointer, so a receipt body never enters the delegator's context.
  */
 
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { AgentToolResult } from "@earendil-works/pi-agent-core";
 import { type ExtensionAPI, parseFrontmatter } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
+import { blockedReasons, delegationPointer } from "./handoff-gate";
 
-// .teamflow/extensions/teamflow-task/index.ts -> .teamflow/agents
-const AGENTS_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..", "agents");
+// .teamflow/extensions/teamflow-task/index.ts -> .teamflow
+const RUNTIME_DIR = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
+const AGENTS_DIR = path.join(RUNTIME_DIR, "agents");
+const HANDOFF_CLI = path.join(
+	RUNTIME_DIR,
+	"skills",
+	"write-handoff",
+	"scripts",
+	"handoff_state.py",
+);
+const WATCHDOG_EXTENSION = path.join(RUNTIME_DIR, "extensions", "agent-watchdog", "index.ts");
 const ROLE_NAME_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 const MAX_CONCURRENCY = 8;
+
+interface OpenedHandoff {
+	handoffId: string;
+	statePath: string;
+	receiptPath: string;
+}
+
+/**
+ * Register the delegation as a handoff. Returns null when there is no run to
+ * record against (for example `pi` started by hand), so delegation keeps
+ * working without a registry rather than failing.
+ */
+function openHandoff(role: string, prompt: string, cwd: string): OpenedHandoff | null {
+	const runId = process.env.TEAMFLOW_RUN_ID;
+	if (!runId || !fs.existsSync(HANDOFF_CLI)) return null;
+	const args = [
+		HANDOFF_CLI,
+		"handoff",
+		"open",
+		"--run-id",
+		runId,
+		"--role",
+		role,
+		"--depth",
+		"1",
+		"--body-file",
+		"-",
+	];
+	const parent = process.env.TEAMFLOW_HANDOFF_ID;
+	if (parent) args.push("--parent-id", parent);
+	const result = spawnSync("python3", args, { cwd, input: prompt, encoding: "utf-8" });
+	if (result.status !== 0 || !result.stdout) return null;
+	try {
+		const payload = JSON.parse(result.stdout);
+		return {
+			handoffId: payload.handoff_id,
+			statePath: payload.state,
+			receiptPath: payload.receipt,
+		};
+	} catch {
+		return null;
+	}
+}
+
+function readHandoffState(statePath: string): { status?: string; result?: string } {
+	try {
+		const state = JSON.parse(fs.readFileSync(statePath, "utf-8"));
+		return { status: state.status, result: state.result };
+	} catch {
+		return {};
+	}
+}
+
+function finishBlocked(handoffId: string, reasons: string[], summary: string, cwd: string): void {
+	const runId = process.env.TEAMFLOW_RUN_ID;
+	if (!runId) return;
+	const args = [
+		HANDOFF_CLI,
+		"handoff",
+		"finish",
+		"--run-id",
+		runId,
+		"--id",
+		handoffId,
+		"--status",
+		"BLOCKED",
+		"--summary",
+		summary,
+	];
+	for (const reason of reasons) args.push("--blocked-reason", reason);
+	spawnSync("python3", args, { cwd, stdio: "ignore" });
+}
+
+/**
+ * Reconcile what the child left behind with what the contract requires.
+ *
+ * Receipt *schema* validation already happened inside the CLI when the child
+ * wrote it, so there is exactly one implementation of the schema; here the
+ * check is existence. A handoff the child already finished is terminal and
+ * immutable — the parent reports it and never rewrites it.
+ */
+function reconcileHandoff(
+	handoff: OpenedHandoff,
+	result: RoleRunResult,
+	cwd: string,
+): { status: string; reasons: string[]; receipt: string | null } {
+	const receiptPresent = fs.existsSync(handoff.receiptPath);
+	const reasons = blockedReasons({
+		exitCode: result.exitCode,
+		stopReason: result.stopReason,
+		aborted: result.aborted,
+		receiptPresent,
+	});
+	const recorded = readHandoffState(handoff.statePath);
+	if (recorded.status === "done" || recorded.status === "blocked") {
+		return {
+			status: recorded.status === "blocked" ? "BLOCKED" : recorded.result ?? "PASS",
+			reasons: recorded.status === "blocked" ? reasons : [],
+			receipt: receiptPresent ? handoff.receiptPath : null,
+		};
+	}
+	if (reasons.length === 0) reasons.push("DELEGATION_ARTIFACT_MISSING");
+	finishBlocked(handoff.handoffId, reasons, result.content.slice(0, 400), cwd);
+	return {
+		status: "BLOCKED",
+		reasons,
+		receipt: receiptPresent ? handoff.receiptPath : null,
+	};
+}
 
 interface TaskDetails {
 	agent: string;
 	exitCode: number;
 	stopReason?: string;
 	stderr: string;
+	handoffId?: string;
+	handoffStatus?: string;
 }
 
 interface ResolvedRole {
@@ -46,6 +175,7 @@ interface RoleRunResult {
 	exitCode: number;
 	stopReason?: string;
 	stderr: string;
+	aborted?: boolean;
 }
 
 function listAvailableRoles(): string {
@@ -135,6 +265,7 @@ async function runRoleChild(
 	prompt: string,
 	signal: AbortSignal | undefined,
 	cwd: string,
+	handoffId?: string,
 ): Promise<RoleRunResult> {
 	const resolution = resolveRole(agent);
 	if (!resolution.ok) {
@@ -154,14 +285,19 @@ async function runRoleChild(
 		"--system-prompt",
 		resolved.body,
 	];
+	// A delegated child is a pi process too, so it needs the same liveness
+	// coverage as depth 0; without it a SIGKILLed child leaves no trace.
+	if (fs.existsSync(WATCHDOG_EXTENSION)) args.push("--extension", WATCHDOG_EXTENSION);
 	if (resolved.tools.length > 0) args.push("--tools", resolved.tools.join(","));
 	args.push("-p", prompt);
 
-	const childEnv = {
+	const childEnv: Record<string, string | undefined> = {
 		...process.env,
 		TEAMFLOW_AGENT_ROLE: role,
 		TEAMFLOW_AGENT_DEPTH: "1",
 	};
+	if (handoffId) childEnv.TEAMFLOW_HANDOFF_ID = handoffId;
+	else delete childEnv.TEAMFLOW_HANDOFF_ID;
 
 	let buffer = "";
 	let finalText = "";
@@ -249,6 +385,7 @@ async function runRoleChild(
 			exitCode,
 			stopReason,
 			stderr: stderr.text,
+			aborted: true,
 		};
 	}
 	if (exitCode !== 0) {
@@ -325,19 +462,41 @@ export default function (pi: ExtensionAPI) {
 				isError: true,
 			});
 
-			const result = await runRoleChild(agent, params.prompt, signal, ctx.cwd);
+			const handoff = openHandoff(agent, params.prompt, ctx.cwd);
+			const result = await runRoleChild(
+				agent,
+				params.prompt,
+				signal,
+				ctx.cwd,
+				handoff?.handoffId,
+			);
 			details.agent = result.agent;
 			details.exitCode = result.exitCode;
 			details.stopReason = result.stopReason;
 			details.stderr = result.stderr;
+			details.handoffId = handoff?.handoffId;
 
-			if (!result.success) {
-				return fail(result.content);
+			// Without a registry there is no pointer to return, so the child's
+			// text stays the result; this is the unregistered fallback path.
+			if (!handoff) {
+				return result.success
+					? { content: [{ type: "text", text: result.content }], details }
+					: fail(result.content);
 			}
-			return {
-				content: [{ type: "text", text: result.content }],
-				details,
-			};
+
+			const reconciled = reconcileHandoff(handoff, result, ctx.cwd);
+			details.handoffStatus = reconciled.status;
+			const pointer = delegationPointer(
+				handoff.handoffId,
+				reconciled.status,
+				reconciled.reasons,
+				reconciled.receipt,
+				handoff.statePath,
+			);
+			const text = JSON.stringify(pointer);
+			return reconciled.status === "PASS"
+				? { content: [{ type: "text", text }], details }
+				: { content: [{ type: "text", text }], details, isError: true };
 		},
 	});
 
@@ -354,8 +513,7 @@ export default function (pi: ExtensionAPI) {
 		async execute(_toolCallId, params, signal, _onUpdate, ctx): Promise<AgentToolResult> {
 			const tasks = params.tasks;
 			const maxConcurrent = Math.min(MAX_CONCURRENCY, Math.max(1, Math.floor(params.max_concurrency ?? 3)));
-			const results: Array<{ agent: string; success: boolean; content: string; exitCode: number }> =
-				new Array(tasks.length);
+			const results: Array<Record<string, unknown>> = new Array(tasks.length);
 			let wasAborted = false;
 			const abortListener = () => { wasAborted = true; };
 			if (signal) {
@@ -381,12 +539,33 @@ export default function (pi: ExtensionAPI) {
 						};
 						continue;
 					}
-					const result = await runRoleChild(task.agent, task.prompt, signal, ctx.cwd);
+					const handoff = openHandoff(task.agent.trim(), task.prompt, ctx.cwd);
+					const result = await runRoleChild(
+						task.agent,
+						task.prompt,
+						signal,
+						ctx.cwd,
+						handoff?.handoffId,
+					);
+					if (!handoff) {
+						results[index] = {
+							agent: result.agent,
+							success: result.success,
+							content: result.content,
+							exitCode: result.exitCode,
+						};
+						continue;
+					}
+					const reconciled = reconcileHandoff(handoff, result, ctx.cwd);
 					results[index] = {
 						agent: result.agent,
-						success: result.success,
-						content: result.content,
-						exitCode: result.exitCode,
+						...delegationPointer(
+							handoff.handoffId,
+							reconciled.status,
+							reconciled.reasons,
+							reconciled.receipt,
+							handoff.statePath,
+						),
 					};
 				}
 			};

@@ -1,9 +1,23 @@
 #!/usr/bin/env python3
+"""Transitional alias for the retired ``phase`` receipt surface.
+
+``teamflow handoff`` supersedes this script; it survives one version so
+agent prompts written against ``teamflow phase`` keep working. The blocked
+enum is imported rather than restated so the alias can never disagree with
+the handoff CLI about which reasons exist.
+"""
 import argparse
 import json
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
+
+sys.dont_write_bytecode = True
+sys.path.insert(
+    0, str(Path(__file__).resolve().parents[2] / "write-handoff" / "scripts")
+)
+from handoff_state import BLOCKED_REASONS, BUDGET_REASONS  # noqa: E402
 
 
 def write(path: Path, value: dict) -> None:
@@ -25,7 +39,7 @@ def main() -> None:
     finish.add_argument("--run-id", required=True)
     finish.add_argument("--status", required=True, choices=("PASS", "FAIL", "BLOCKED"))
     finish.add_argument("--summary", required=True)
-    finish.add_argument("--block-reason", choices=("CONTEXT_BUDGET_EXCEEDED", "RECALL_BUDGET_EXCEEDED"))
+    finish.add_argument("--block-reason", action="append", choices=BLOCKED_REASONS)
     finish.add_argument("--budget-limit", type=int)
     finish.add_argument("--budget-used", type=int)
     finish.add_argument("--budget-remaining", type=int)
@@ -71,18 +85,21 @@ def main() -> None:
         }
         value.update({"status": args.status, "summary": args.summary, "finished_at": now})
         if args.block_reason:
-            value["budget_failure"] = {
-                "reason": args.block_reason,
-                "budget": {
-                    "limit": args.budget_limit,
-                    "used": args.budget_used,
-                    "remaining": args.budget_remaining,
-                },
-                "protected_component": args.protected_component,
-                "required_action": args.required_action,
-                "largest_sources": json.loads(args.largest_sources),
-                "source_refs": json.loads(args.source_refs),
-            }
+            reasons = list(args.block_reason)
+            value["blocked"] = {"reason": reasons[0], "reasons": reasons}
+            if any(reason in BUDGET_REASONS for reason in reasons):
+                value["budget_failure"] = {
+                    "reason": reasons[0],
+                    "budget": {
+                        "limit": args.budget_limit,
+                        "used": args.budget_used,
+                        "remaining": args.budget_remaining,
+                    },
+                    "protected_component": args.protected_component,
+                    "required_action": args.required_action,
+                    "largest_sources": json.loads(args.largest_sources),
+                    "source_refs": json.loads(args.source_refs),
+                }
         write(path, value)
     elif args.command == "planning-experience":
         phases_dir = run_dir / "phases"
