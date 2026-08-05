@@ -128,7 +128,12 @@ def main(argv):
                 break
             _write_heartbeat(paths, args.pid, args.role, args.depth, started_at)
             if waiter.wait(interval):
-                break
+                # A pidfd/proc wakeup must be reconfirmed against _alive: a
+                # still-alive pid means a spurious wakeup (e.g. a pidfd race)
+                # and the monitor must keep watching rather than emit a false
+                # runner_exited stop signal for the outer loop.
+                if not _alive(args.pid):
+                    break
     finally:
         waiter.close()
 
