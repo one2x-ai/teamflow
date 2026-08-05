@@ -95,13 +95,14 @@ def _now():
 
 
 def slug(value):
-    slug = re.sub(r"[^a-z0-9]+", "-", str(value).lower()).strip("-")
-    return slug or "unnamed"
+    cleaned = re.sub(r"[^a-z0-9]+", "-", str(value).lower()).strip("-")
+    return cleaned or "unnamed"
 
 
 def write_json_atomic(path, value):
+    """Write via a per-process staging file so a reader never sees a partial."""
     path.parent.mkdir(parents=True, exist_ok=True)
-    staging = path.with_name(f".{path.name}.tmp")
+    staging = path.with_name(f".{path.name}.{os.getpid()}.tmp")
     staging.write_text(
         json.dumps(value, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
     )
