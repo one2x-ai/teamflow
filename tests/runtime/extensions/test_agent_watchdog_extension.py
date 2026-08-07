@@ -200,12 +200,27 @@ class StreamIdleAbortTests(unittest.TestCase):
             "heartbeats do not fire message_update, which is the whole point",
         )
 
-    def test_gates_on_isIdle_so_local_work_is_not_aborted(self):
+    def test_gates_on_an_in_flight_flag_not_isidle(self):
+        # A TTFT stall (request sent, no token yet) happens BEFORE any
+        # message_update, while pi may still report the agent as "idle".
+        # Gating on isIdle silently skips that case (verified: a TTFT stall
+        # ran 10+ minutes without firing). The gate must be a turn/request
+        # in-flight flag, not isIdle().
         self.assertIn(
+            "providerInFlight",
+            self.text,
+            "abort must gate on an in-flight flag bracketed by turn/request "
+            "lifecycle events, not on ctx.isIdle()",
+        )
+        self.assertIn(
+            '"turn_start"',
+            self.text,
+            "the in-flight window opens at turn_start so TTFT stalls are covered",
+        )
+        self.assertNotIn(
             "isIdle()",
             self.text,
-            "the abort must fire only while the agent is streaming, never "
-            "between turns or during local tool execution",
+            "isIdle() is false-negative during TTFT and must not gate the abort",
         )
 
     def test_aborts_through_ctx_abort(self):

@@ -70,6 +70,16 @@ const STREAM_IDLE_TICK_MS = Number.parseInt(
 
 let currentCtx: ExtensionContext | null = null;
 let lastProgressAt = Date.now();
+/**
+ * True while a provider turn is in flight (request sent, response not
+ * finished). Brackets the whole turn — including the time-to-first-token wait
+ * before any `message_update` — so TTFT stalls are covered. We deliberately
+ * do NOT gate on pi's reported idle flag: pi may report the agent as idle
+ * during TTFT, which is exactly when a dead connection stalls, and gating on
+ * it silently skips that case (verified: a TTFT stall ran 10+ minutes without
+ * firing).
+ */
+let providerInFlight = false;
 
 /** Stamp progress and remember the latest context for the idle timer. */
 function markProgress(ctx: ExtensionContext | null | undefined): void {
@@ -138,14 +148,30 @@ export default function (pi: ExtensionAPI) {
 	// --- Stream-idle abort (responsibility 3) -------------------------------
 	// Stamp progress on every real streaming/tool event. SSE heartbeat
 	// comments do not fire these, so the idle clock keeps running while a
-	// stalled provider trickles keepalive bytes.
-	pi.on("before_provider_request", (_e, ctx) => markProgress(ctx));
+	// stalled provider trickles keepalive bytes. `providerInFlight` brackets
+	// the whole turn (request -> turn_end), covering TTFT stalls too.
+	pi.on("turn_start", (_e, ctx) => {
+		providerInFlight = true;
+		markProgress(ctx);
+	});
+	pi.on("before_provider_request", (_e, ctx) => {
+		providerInFlight = true;
+		markProgress(ctx);
+	});
 	pi.on("after_provider_response", (_e, ctx) => markProgress(ctx));
 	pi.on("message_start", (_e, ctx) => markProgress(ctx));
 	pi.on("message_update", (_e, ctx) => markProgress(ctx));
 	pi.on("tool_execution_start", (_e, ctx) => markProgress(ctx));
 	pi.on("tool_execution_update", (_e, ctx) => markProgress(ctx));
 	pi.on("tool_execution_end", (_e, ctx) => markProgress(ctx));
+	// Turn / agent boundaries: the request is no longer in flight.
+	const clearInFlight = (): void => {
+		providerInFlight = false;
+	};
+	pi.on("message_end", clearInFlight);
+	pi.on("turn_end", clearInFlight);
+	pi.on("agent_end", clearInFlight);
+	pi.on("agent_settled", clearInFlight);
 
 	if (
 		Number.isFinite(STREAM_IDLE_TIMEOUT_MS) &&
@@ -154,17 +180,9 @@ export default function (pi: ExtensionAPI) {
 		STREAM_IDLE_TICK_MS > 0
 	) {
 		setInterval(() => {
+			if (!providerInFlight) return;
 			const ctx = currentCtx;
 			if (!ctx) return;
-			// Only while the agent is actively streaming (a provider request is
-			// in flight). Between turns and during local work isIdle() is true.
-			let streaming: boolean;
-			try {
-				streaming = !ctx.isIdle();
-			} catch {
-				return;
-			}
-			if (!streaming) return;
 			const idleMs = Date.now() - lastProgressAt;
 			if (idleMs <= STREAM_IDLE_TIMEOUT_MS) return;
 			process.stderr.write(
