@@ -4,7 +4,7 @@ This repository defines and evolves Teamflow, a multi-agent coding system.
 
 ## Architectural self-consistency
 
-Any change to this repository — product code, tests, scripts, prompts, or documentation — goes through teamflow's agents. An outer loop may write the handoff, observe event metadata, verify artifacts, and commit; it may not implement, fix, or refactor. When a delegation returns something wrong, the outer loop collects the failure receipt and delegates again. This exercises the process on itself so defects surface here, not in business projects.
+Any change to this repository — product code, tests, scripts, prompts, or documentation — goes through teamflow's agents. An observe loop may write the handoff, observe event metadata, verify artifacts, and commit; it may not implement, fix, or refactor. When a delegation returns something wrong, the observe loop collects the failure receipt and delegates again. This exercises the process on itself so defects surface here, not in business projects.
 
 Narrow exceptions: writing or correcting the handoff itself; reverting a bad change with git; temporarily breaking something to prove a test fails, then restoring it (verification, not implementation); emergency recovery when the agent path itself is broken — say so in the report.
 
@@ -61,9 +61,9 @@ State changes and state queries are programmatic; requirement expression and orc
 - Keep `.teamflow/` limited to Pi-agent runtime content. Another harness's config (`openai.yaml`, `CLAUDE.md`, `.codex/`) belongs in `.teamflow/.gitignore`, not in the managed file set.
 - Install product files only. Teamflow's own development context — test suites, `runs/`, `sessions/`, credentials, `docs/`, and the repository-level `AGENTS.md` and `README.md` — must never reach a business project.
 
-## External loop observation
+## Observe loop observation
 
-External coordinators observe metadata only. Wait on one blocking call — `teamflow wait --run-id <id> --since <seq>` — and escalate to `teamflow handoff status --run-id <id>` or `teamflow agents list` only when a returned status warrants it; check expected artifact existence below `.teamflow/runs/`. Never read session files, prompts, reasoning, responses, raw errors, configuration, or credentials. There are exactly two stop signals: a handoff finished `BLOCKED`, and `runner_exited` arriving while the last business event is not terminal. Terminal silence alone is not a failure and must not terminate the inner loop.
+External coordinators observe metadata only. Wait on one blocking call — `teamflow wait --run-id <id> --since <seq>` — and escalate to `teamflow handoff status --run-id <id>` or `teamflow agents list` only when a returned status warrants it; check expected artifact existence below `.teamflow/runs/`. Never read session files, prompts, reasoning, responses, raw errors, configuration, or credentials. There are exactly two stop signals: a handoff finished `BLOCKED`, and `runner_exited` arriving while the last business event is not terminal. Terminal silence alone is not a failure and must not terminate the execute loop.
 
 ## Cross-project memory
 
