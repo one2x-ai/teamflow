@@ -124,16 +124,22 @@ else
   fail "handoff state CLI .teamflow/skills/write-handoff/scripts/handoff_state.py is unavailable"
 fi
 
-if python3 .teamflow/skills/observe-inner-loop/scripts/wait.py --help >/dev/null; then
+if python3 .teamflow/skills/observer/scripts/wait.py --help >/dev/null; then
   pass "teamflow wait event listener is operational"
 else
-  fail "teamflow wait listener .teamflow/skills/observe-inner-loop/scripts/wait.py is unavailable"
+  fail "teamflow wait listener .teamflow/skills/observer/scripts/wait.py is unavailable"
 fi
 
-if python3 .teamflow/skills/observe-inner-loop/scripts/watchdog.py --help >/dev/null; then
+if python3 .teamflow/skills/observer/scripts/watchdog.py --help >/dev/null; then
   pass "liveness watchdog is operational"
 else
-  fail "liveness watchdog .teamflow/skills/observe-inner-loop/scripts/watchdog.py is unavailable"
+  fail "liveness watchdog .teamflow/skills/observer/scripts/watchdog.py is unavailable"
+fi
+
+if python3 .teamflow/bin/agent-status --help >/dev/null 2>&1; then
+  pass "teamflow agent-status probe is operational"
+else
+  fail "teamflow agent-status .teamflow/bin/agent-status is unavailable"
 fi
 
 # Transitional alias retained for one version while prompts migrate.
@@ -305,7 +311,7 @@ if grep -q 'plan-change' <<<"$SKILL_OUTPUT" && \
    grep -q 'memory-notes' <<<"$SKILL_OUTPUT" && \
    grep -q 'memory-capture' <<<"$SKILL_OUTPUT" && \
    grep -q 'memory-recall' <<<"$SKILL_OUTPUT" && \
-   grep -q 'observe-inner-loop' <<<"$SKILL_OUTPUT" && \
+   grep -q 'observer' <<<"$SKILL_OUTPUT" && \
    grep -q 'write-handoff' <<<"$SKILL_OUTPUT" && \
    grep -q 'memory-curate' <<<"$SKILL_OUTPUT" && \
    grep -q 'extract-memory' <<<"$SKILL_OUTPUT" && \

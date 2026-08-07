@@ -121,7 +121,7 @@ class InstallShipsProductOnlyTests(unittest.TestCase):
         self.assertEqual(completed.returncode, 0, completed.stderr)
         return [
             line.strip() for line in completed.stdout.splitlines()
-            if line.strip() and not line.startswith(".gitignore:")
+            if line.strip() and not line.startswith((".gitignore:", "AGENTS.md:"))
         ]
 
     def test_manifest_excludes_development_context(self):
@@ -156,8 +156,19 @@ class InstallShipsProductOnlyTests(unittest.TestCase):
             f"managed files must live below .teamflow/: {offenders}",
         )
 
+    def test_manifest_installs_agent_status(self):
+        """``teamflow agent-status`` is dispatched by the wrapper and referenced
+        by the observer skill, so the installer must ship it — otherwise the
+        command is file-not-found in a target project."""
+        self.assertIn(
+            ".teamflow/bin/agent-status",
+            self._dry_run_manifest(),
+            "agent-status must be in the installer's FILES so `teamflow "
+            "agent-status` resolves after install",
+        )
+
     def test_install_does_not_ship_repository_instructions(self):
-        """The repo's own AGENTS.md guides outer-loop maintainers, not projects.
+        """The repo's own AGENTS.md guides observe-loop maintainers, not projects.
 
         The shared runtime constraints ship as .teamflow/AGENTS.md; the
         repository-level AGENTS.md at the root must not be copied, or a
@@ -215,6 +226,128 @@ class InstallShipsProductOnlyTests(unittest.TestCase):
             )
             # The manifest is the only installer bookkeeping file.
             self.assertTrue((runtime / "manifest.json").is_file())
+
+
+class RootAgentsMdBridgeTests(unittest.TestCase):
+    """A business project's root AGENTS.md is an entry-point bridge, not a dump.
+
+    The execute-loop contract ships as .teamflow/AGENTS.md (git-ignored,
+    byte-managed) and is written for the Teamflow runtime's own pi-runtime
+    agents. Feeding it to an external agent (e.g. a generic coding agent that
+    reads the repository root) makes that agent reconstruct the workflow by
+    hand — authoring handoff files and calling pi-runtime directly instead of
+    starting one run. The root AGENTS.md therefore leads with the single entry
+    command plus a guardrail, never the execute-loop body. It is a committed,
+    line-level file (not byte-managed), so a project's existing rules survive.
+    """
+
+    def _install(self, project: Path) -> subprocess.CompletedProcess:
+        root = project.parent
+        home = root / "home"
+        launchers = root / "bin"
+        home.mkdir(exist_ok=True)
+        launchers.mkdir(exist_ok=True)
+        subprocess.run(["git", "init", "-q", str(project)], check=True)
+        env = os.environ.copy()
+        for key in list(env):
+            if key.startswith(("TEAMFLOW_", "WORKFLOW_", "OPENCODE_WORKFLOW_")):
+                env.pop(key)
+        env.update({
+            "HOME": str(home),
+            "TEAMFLOW_HOME": str(home / ".teamflow"),
+            "TEAMFLOW_BIN_DIR": str(launchers),
+        })
+        return subprocess.run(
+            [str(INSTALL), str(project)],
+            cwd=ROOT, env=env, capture_output=True, text=True,
+            stdin=subprocess.DEVNULL, timeout=180,
+        )
+
+    def _is_ignored(self, project: Path, relative: str) -> bool:
+        completed = subprocess.run(
+            ["git", "check-ignore", "-q", relative],
+            cwd=str(project), capture_output=True, text=True,
+        )
+        return completed.returncode == 0
+
+    def _assert_entry_point_and_guardrail(self, text: str) -> None:
+        """Regression for the 'probed teamflow code instead of running it' bug.
+
+        The bridge must state the one entry command and forbid hand
+        reconstruction; otherwise an external agent reverse-engineers the
+        runtime by reading skills, hand-authoring handoffs, and calling
+        pi-runtime directly.
+        """
+        self.assertIn(
+            "teamflow run --agent planner", text,
+            "the bridge must state the single entry command",
+        )
+        self.assertIn(
+            "reconstruct", text.lower(),
+            "the bridge must forbid reconstructing the workflow by hand",
+        )
+        self.assertIn(
+            "pi-runtime", text,
+            "the bridge must forbid calling pi-runtime directly",
+        )
+
+    def test_creates_bridge_when_absent(self):
+        """A project without AGENTS.md gets an entry-point bridge."""
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "target"
+            project.mkdir()
+            completed = self._install(project)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+            agents_md = project / "AGENTS.md"
+            self.assertTrue(agents_md.is_file(), "root AGENTS.md must be created")
+            text = agents_md.read_text(encoding="utf-8")
+            # Bridge only: the execute-loop body must not be copied to the root.
+            self.assertNotIn(
+                "Teamflow Agent Instructions", text,
+                ".teamflow/AGENTS.md content must not be copied to the root",
+            )
+            self._assert_entry_point_and_guardrail(text)
+            # The root file is committed, not ignored.
+            self.assertFalse(
+                self._is_ignored(project, "AGENTS.md"),
+                "root AGENTS.md must not be git-ignored",
+            )
+
+    def test_augments_existing_and_preserves_content(self):
+        """An existing AGENTS.md keeps its content and gains the bridge."""
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "target"
+            project.mkdir()
+            (project / "AGENTS.md").write_text(
+                "# My Project\n\nCustom project rules stay here.\n",
+                encoding="utf-8",
+            )
+            completed = self._install(project)
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+
+            text = (project / "AGENTS.md").read_text(encoding="utf-8")
+            self.assertIn("Custom project rules stay here.", text)
+            self._assert_entry_point_and_guardrail(text)
+
+    def test_bridge_is_idempotent(self):
+        """Re-installing does not duplicate the bridge section."""
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory) / "target"
+            project.mkdir()
+            first = self._install(project)
+            self.assertEqual(first.returncode, 0, first.stderr)
+            after_first = (project / "AGENTS.md").read_text(encoding="utf-8")
+
+            second = self._install(project)
+            self.assertEqual(second.returncode, 0, second.stderr)
+            after_second = (project / "AGENTS.md").read_text(encoding="utf-8")
+
+            self.assertEqual(after_first, after_second)
+            self.assertEqual(
+                after_second.count("teamflow run --agent planner"), 1,
+                "the entry command must appear exactly once",
+            )
 
 
 class CleanRemovesDisposableArtifactsTests(unittest.TestCase):

@@ -1,6 +1,6 @@
 """Requirement tests for the liveness watchdog (design S2.8).
 
-Liveness and business events are orthogonal channels, and the outer loop
+Liveness and business events are orthogonal channels, and the observe loop
 spends zero tokens on liveness. Two facts drive the design:
 
 1. A plugin lives *inside* the pi process. When that process is SIGKILLed or
@@ -8,7 +8,7 @@ spends zero tokens on liveness. Two facts drive the design:
    "I died" receipt. The monitor must be a separate process that outlives it.
 2. A depth-1 child's exit is already observed by the parent delegation, so
    publishing it to the event stream would be noise. Only a depth-0 exit
-   means nobody is left to report that the inner loop stopped.
+   means nobody is left to report that the execute loop stopped.
 
 All paths are relative to the repository root
 ``ROOT = Path(__file__).resolve().parents[3]``.
@@ -28,7 +28,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 WATCHDOG = (
-    ROOT / ".teamflow" / "skills" / "observe-inner-loop" / "scripts" / "watchdog.py"
+    ROOT / ".teamflow" / "skills" / "observer" / "scripts" / "watchdog.py"
 )
 HANDOFF_STATE = (
     ROOT / ".teamflow" / "skills" / "write-handoff" / "scripts" / "handoff_state.py"
@@ -135,7 +135,7 @@ class WatchdogExistenceTests(unittest.TestCase):
     def test_watchdog_script_exists(self):
         self.assertTrue(
             WATCHDOG.is_file(),
-            "the watchdog belongs to observe-inner-loop so it installs with "
+            "the watchdog belongs to observer so it installs with "
             "the runtime",
         )
 
@@ -268,7 +268,7 @@ class ExitDetectionTests(unittest.TestCase):
         """An auxiliary depth-1 agent (e.g. title-compressor) that exits must
         neither publish runner_exited nor appear as a live/depth-0 runner in
         the coordination board, so a short-lived helper can never emit a false
-        stop signal for the outer loop."""
+        stop signal for the observe loop."""
         pid = self.fixture.start_monitored()
         self.fixture.start_watchdog(pid, role="title-compressor", depth=1)
         wait_until(
@@ -353,7 +353,7 @@ class SpuriousWakeupTests(unittest.TestCase):
 
     The watchdog must reconfirm with _alive before reporting an exit, so a
     still-alive runner is never falsely reported as exited (which would emit
-    a false run-level runner_exited stop signal for the outer loop).
+    a false run-level runner_exited stop signal for the observe loop).
     """
 
     def test_spurious_wakeup_on_live_pid_does_not_report_exit(self):

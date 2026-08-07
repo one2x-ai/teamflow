@@ -57,7 +57,7 @@ opencode 的 `/event` 返回 `text/event-stream` 并已设 `x-accel-buffering: n
 
 ### 3.5 外层 loop 视角不越界
 
-`observe-inner-loop` skill 规定外层 loop 只读 phase 元数据与产物存在性，不读 session 文件、prompt、reasoning、response。
+`observer` skill 规定外层 loop 只读 phase 元数据与产物存在性，不读 session 文件、prompt、reasoning、response。
 
 Chat 页面展示的是 **opencode 自己的会话**，即外层 loop 自身的对话记录，不是 pi 内层角色的会话。这与该约束不冲突：外层 loop 读自己的历史是正当的。设计上明确区分：
 

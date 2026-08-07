@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Block until a teamflow run delivers new events, then return the increment.
 
-This replaces the old polling ladder. The outer loop makes one call and is
+This replaces the old polling ladder. The observe loop makes one call and is
 suspended until something happens or the timeout expires, so an unchanged
-inner loop costs zero tokens and never disturbs the KV cache.
+execute loop costs zero tokens and never disturbs the KV cache.
 
 Only file *names* are parsed. The name carries sequence, subject, kind, and
 status, which is everything needed to decide whether a body is worth
@@ -128,7 +128,7 @@ def _open_inotify(directory, backend):
     """Return a watcher, or None to fall back to stat polling.
 
     Observation is read-only, so a directory that does not exist yet is not
-    created here — the loop polls until the inner loop makes it and attaches
+    created here — the loop polls until the execute loop makes it and attaches
     a watch then. Unavailability degrades instead of failing: the caller's
     contract is "one call, suspended until something happens", not "inotify".
     """

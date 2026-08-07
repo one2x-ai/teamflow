@@ -23,7 +23,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[3]
 EXTENSION = ROOT / ".teamflow" / "extensions" / "agent-watchdog" / "index.ts"
 WATCHDOG = (
-    ROOT / ".teamflow" / "skills" / "observe-inner-loop" / "scripts" / "watchdog.py"
+    ROOT / ".teamflow" / "skills" / "observer" / "scripts" / "watchdog.py"
 )
 INSTALL = ROOT / "scripts" / "install.sh"
 DOCTOR = ROOT / "scripts" / "doctor.sh"
@@ -175,6 +175,60 @@ class WiringTests(unittest.TestCase):
 
     def test_doctor_verifies_the_extension(self):
         self.assertIn("agent-watchdog", read(DOCTOR))
+
+
+class StreamIdleAbortTests(unittest.TestCase):
+    """A stalled provider stream must abort, not hang forever.
+
+    A provider can stall mid-stream while keeping the TCP connection byte-busy
+    with SSE heartbeat comments. That defeats every byte/transport-level guard:
+    undici ``bodyTimeout`` resets on any data and TCP keepalive probes get ACKed
+    by the healthy peer stack (both verified). The only signal that survives is
+    "no real ``message_update`` for N seconds while the agent is streaming",
+    because SSE comment heartbeats never fire ``message_update``. This extension
+    owns that signal and aborts the in-flight request via ``ctx.abort()``.
+    """
+
+    def setUp(self):
+        self.text = read(EXTENSION)
+
+    def test_subscribes_to_message_update_for_progress(self):
+        self.assertIn(
+            '"message_update"',
+            self.text,
+            "progress must be stamped on real streaming chunks; SSE comment "
+            "heartbeats do not fire message_update, which is the whole point",
+        )
+
+    def test_gates_on_isIdle_so_local_work_is_not_aborted(self):
+        self.assertIn(
+            "isIdle()",
+            self.text,
+            "the abort must fire only while the agent is streaming, never "
+            "between turns or during local tool execution",
+        )
+
+    def test_aborts_through_ctx_abort(self):
+        self.assertIn(
+            "ctx.abort()",
+            self.text,
+            "recovery is aborting the provider request via the context, which "
+            "trips the AbortSignal pi passes into the provider fetch",
+        )
+
+    def test_default_timeout_is_five_minutes(self):
+        self.assertIn(
+            "300000",
+            self.text,
+            "the default stream-idle window is 5 minutes",
+        )
+
+    def test_timeout_is_configurable_and_disableable(self):
+        self.assertIn(
+            "TEAMFLOW_STREAM_IDLE_TIMEOUT_MS",
+            self.text,
+            "the timeout must be tunable via environment, and =0 must disable",
+        )
 
 
 if __name__ == "__main__":

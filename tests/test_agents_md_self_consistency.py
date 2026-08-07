@@ -48,13 +48,13 @@ class AgentsMdSelfConsistencyRuleTests(unittest.TestCase):
             "'agents' in isolation",
         )
 
-    def test_outer_loop_may_observe_not_implement(self):
+    def test_observe_loop_may_observe_not_implement(self):
         """The rule must separate observation from implementation."""
         lower = self.text.lower()
         has_prohibition = "may not" in lower or "must not" in lower
         self.assertTrue(
             has_prohibition,
-            "the rule must state what an outer loop may not or must not do",
+            "the rule must state what an observe loop may not or must not do",
         )
         names_prohibited = any(
             w in lower for w in ("implement", "fix", "refactor")
@@ -69,7 +69,7 @@ class AgentsMdSelfConsistencyRuleTests(unittest.TestCase):
         )
         self.assertTrue(
             names_permitted,
-            "the rule must name at least one thing an outer loop may do "
+            "the rule must name at least one thing an observe loop may do "
             "(handoff, observe, verify, or commit)",
         )
 

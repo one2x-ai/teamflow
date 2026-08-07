@@ -2,12 +2,12 @@
 
 The 30-second polling ladder (probe -> phase status -> session list) cost a
 tool call plus a result on every tick, even when nothing had changed, and
-each one broke the outer loop's KV cache. ``teamflow wait`` replaces the
+each one broke the observe loop's KV cache. ``teamflow wait`` replaces the
 whole ladder with one blocking call: it returns when something happens or
 when the timeout expires, and ``--since`` makes reconnecting idempotent.
 
 The listener reads *file names*, not bodies: the name carries the sequence,
-subject, kind, and status, which is all the outer loop needs to decide
+subject, kind, and status, which is all the observe loop needs to decide
 whether to look closer.
 
 All paths are relative to the repository root
@@ -25,7 +25,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[3]
-WAIT_CLI = ROOT / ".teamflow" / "skills" / "observe-inner-loop" / "scripts" / "wait.py"
+WAIT_CLI = ROOT / ".teamflow" / "skills" / "observer" / "scripts" / "wait.py"
 HANDOFF_CLI = (
     ROOT / ".teamflow" / "skills" / "write-handoff" / "scripts" / "handoff_state.py"
 )
@@ -99,7 +99,7 @@ class WaitExistenceTests(unittest.TestCase):
     def test_wait_script_exists(self):
         self.assertTrue(
             WAIT_CLI.is_file(),
-            "wait.py belongs to the observe-inner-loop skill so it installs "
+            "wait.py belongs to the observer skill so it installs "
             "with the runtime",
         )
 
@@ -282,7 +282,7 @@ class WaitBackendEquivalenceTests(unittest.TestCase):
 
 
 class WaitOutputStabilityTests(unittest.TestCase):
-    """Byte-stable output protects the outer loop's KV cache."""
+    """Byte-stable output protects the observe loop's KV cache."""
 
     def test_repeated_calls_produce_identical_bytes(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -346,7 +346,7 @@ class WaitSpoolDiscoveryTests(unittest.TestCase):
             self.assertEqual(payload["events"], [])
 
     def test_missing_run_directory_is_not_an_error(self):
-        """The outer loop may start waiting before the inner loop writes."""
+        """The observe loop may start waiting before the execute loop writes."""
         with tempfile.TemporaryDirectory() as directory:
             fixture = WaitFixture(Path(directory))
             payload, completed = fixture.wait(run_id="run-does-not-exist", timeout="1")
@@ -365,7 +365,7 @@ class WaitSpoolDiscoveryTests(unittest.TestCase):
             )
 
     def test_waiting_attaches_once_the_run_appears(self):
-        """Starting before the inner loop must still deliver its first event."""
+        """Starting before the execute loop must still deliver its first event."""
         with tempfile.TemporaryDirectory() as directory:
             fixture = WaitFixture(Path(directory))
 

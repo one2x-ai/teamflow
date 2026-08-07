@@ -3,7 +3,7 @@
 The probe is a cheap, stdlib-only Python script that resolves a run's
 current handoff receipt and prints exactly one line of metadata. Since the
 handoff refactor it is a *manual* diagnostic rather than a rung on a
-polling ladder — outer-loop observation is ``teamflow wait``, which blocks
+polling ladder — observe-loop observation is ``teamflow wait``, which blocks
 instead of polling — so its job is to answer "is this run alive, and what
 is it on?" in one line a human can read.
 
@@ -23,7 +23,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PROBE = ROOT / ".teamflow" / "skills" / "observe-inner-loop" / "scripts" / "probe.py"
+PROBE = ROOT / ".teamflow" / "skills" / "observer" / "scripts" / "probe.py"
 TEAMFLOW_BIN = ROOT / ".teamflow" / "bin" / "teamflow"
 
 DEAD_PID = 999999
@@ -32,7 +32,7 @@ PROBE_TIMEOUT = 30
 # Keys the probe is permitted to emit — nothing else.
 ALLOWED_KEYS = {"state", "activity", "fp"}
 
-# The probe must be isolated from inner-loop data: neither its output nor its
+# The probe must be isolated from execute-loop data: neither its output nor its
 # source may reference these substrings.
 FORBIDDEN_OUTPUT = ("turn", "tool", "event", "message", "prompt", "session")
 FORBIDDEN_SOURCE = (
@@ -163,7 +163,7 @@ class ProbeExistenceTests(unittest.TestCase):
     def test_probe_exists_and_is_executable(self):
         self.assertTrue(
             PROBE.is_file(),
-            "probe.py must exist at .teamflow/skills/observe-inner-loop/scripts/probe.py",
+            "probe.py must exist at .teamflow/skills/observer/scripts/probe.py",
         )
         self.assertTrue(
             os.access(str(PROBE), os.X_OK),
@@ -551,9 +551,9 @@ class ProbeSubcommandTests(unittest.TestCase):
 
 
 class ProbeOutputIsolationTests(unittest.TestCase):
-    """Probe output must never leak inner-loop data nouns."""
+    """Probe output must never leak execute-loop data nouns."""
 
-    def test_output_contains_no_inner_loop_nouns(self):
+    def test_output_contains_no_execute_loop_nouns(self):
         with tempfile.TemporaryDirectory() as td:
             tmp = Path(td)
             home = tmp / "home"

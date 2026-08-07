@@ -131,7 +131,7 @@ def main(argv):
                 # A pidfd/proc wakeup must be reconfirmed against _alive: a
                 # still-alive pid means a spurious wakeup (e.g. a pidfd race)
                 # and the monitor must keep watching rather than emit a false
-                # runner_exited stop signal for the outer loop.
+                # runner_exited stop signal for the observe loop.
                 if not _alive(args.pid):
                     break
     finally:

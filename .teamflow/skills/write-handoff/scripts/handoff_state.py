@@ -738,7 +738,7 @@ def cmd_handoff_runner_exited(args, paths):
 
     A depth-1 child's exit is already observed by the parent delegation, so
     publishing it would be noise. A depth-0 exit is different: nobody else
-    is left to report that the inner loop stopped.
+    is left to report that the execute loop stopped.
     """
     record = {
         "schema_version": SCHEMA_VERSION,

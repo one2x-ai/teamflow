@@ -1,10 +1,10 @@
 """Requirement tests for run-id allocation and injection (design S2.7).
 
-The outer loop used to guess the current run by directory mtime, and
+The observe loop used to guess the current run by directory mtime, and
 ``probe`` had to scan the process table for any ``pi``. Both are guesses.
 ``teamflow run`` now allocates the run-id itself, exports it as
 ``TEAMFLOW_RUN_ID`` so every child inherits it, records the depth-0 pid in
-``runner.json``, and prints one machine-readable line the outer loop can
+``runner.json``, and prints one machine-readable line the observe loop can
 read without parsing prose.
 
 All paths are relative to the repository root
@@ -175,7 +175,7 @@ class RunIdAllocationTests(unittest.TestCase):
             project, home = self._project(Path(directory))
             body = project / "root-handoff.md"
             body.write_text(
-                "- Goal: the outer loop's delegation has a persisted body.\n"
+                "- Goal: the observe loop's delegation has a persisted body.\n"
                 "- Scope: .teamflow/bin/pi-runtime\n",
                 encoding="utf-8",
             )
@@ -191,7 +191,7 @@ class RunIdAllocationTests(unittest.TestCase):
             self.assertEqual(
                 (base / "handoff.md").read_text(encoding="utf-8"),
                 body.read_text(encoding="utf-8"),
-                "the outer loop's handoff must be persisted verbatim",
+                "the observe loop's handoff must be persisted verbatim",
             )
             state = json.loads((base / "state.json").read_text(encoding="utf-8"))
             self.assertEqual(state["depth"], 0, "the root handoff runs at depth 0")

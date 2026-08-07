@@ -58,6 +58,8 @@ teamflow run --agent planner "为当前项目增加一个健康检查接口"   #
 
 安装器遵循最小 Git 侵入原则：所有运行文件只写入 `.teamflow/`；`.gitignore` 只增加 `.teamflow/`；业务项目已有的配置与源码完全保留；manifest 位于 `.teamflow/manifest.json`，支持幂等更新与冲突检测，用户改动过的受管文件不会被静默覆盖；只安装产品文件——Teamflow 自身的开发上下文（测试、`runs/`、`sessions/`、凭证、`docs/`、仓库级 README 与 AGENTS.md）不会进入业务项目。
 
+根 `AGENTS.md` 是唯一额外的根级改动，且是**入口桥接**而非复制内层约束：若业务项目没有 `AGENTS.md`，安装器创建一个以 `teamflow run --agent planner "<需求>"` 为入口、并明确禁止手工重建工作流（不自己写 handoff、不直接调 `pi-runtime`、不读 `.teamflow/` 复刻编排）的最小文件；若已存在，则在末尾追加同样的桥接小节，原有内容原样保留；已含入口命令时不再重复添加。这样外部 agent（直接读仓库根的通用编码 agent）只发起一次 run、用元数据观察，不会反向工程 teamflow runtime。根 `AGENTS.md` 不被忽略（是正常提交的文件），`.teamflow/` 整体仍被忽略；内层约束 `.teamflow/AGENTS.md` 仅供 runtime 自己的 agent 使用。
+
 ## 卸载
 
 ```bash
@@ -107,7 +109,7 @@ teamflow source-check                       # 拒绝源码中的非打印控制�
 
 测试由 test-writer 生成统一补丁到 `.teamflow/runs/test-patches/`；`teamflow test-patch check` 校验后由 coder 用 `teamflow test-patch apply` 机械应用。被委派的 `PASS`/`FAIL` 必须附带通过 schema 校验的收据文件（`teamflow handoff finish --receipt <file>`）；最终 assistant 文本不是收据。
 
-明确的 provider 超时、认证失败、额度不足、overload、传输失败或用户取消必须把该 handoff 结束为真实的 `BLOCKED`，不能折叠为空结果或静默重试；`blocked.reason` 是单一枚举：`CONTEXT_BUDGET_EXCEEDED`、`RECALL_BUDGET_EXCEEDED`、`DELEGATION_ARTIFACT_MISSING`、`OUTPUT_TRUNCATED`、`PROVIDER_FAILURE`、`USER_CANCELLED`。外层协调只观察元数据：一次阻塞的 `teamflow wait`，必要时升级到 `teamflow handoff status` 或 `teamflow agents list`，不读会话文件、prompt、response 或凭证。停机信号只有两个——handoff 结束为 `BLOCKED`，以及 `runner_exited` 出现而其前最后一个业务事件不是终态；终端静默与墙钟时间都不是失败（见 `.teamflow/skills/observe-inner-loop/`）。
+明确的 provider 超时、认证失败、额度不足、overload、传输失败或用户取消必须把该 handoff 结束为真实的 `BLOCKED`，不能折叠为空结果或静默重试；`blocked.reason` 是单一枚举：`CONTEXT_BUDGET_EXCEEDED`、`RECALL_BUDGET_EXCEEDED`、`DELEGATION_ARTIFACT_MISSING`、`OUTPUT_TRUNCATED`、`PROVIDER_FAILURE`、`USER_CANCELLED`。外层协调只观察元数据：一次阻塞的 `teamflow wait`，必要时升级到 `teamflow handoff status` 或 `teamflow agents list`，不读会话文件、prompt、response 或凭证。停机信号只有两个——handoff 结束为 `BLOCKED`，以及 `runner_exited` 出现而其前最后一个业务事件不是终态；终端静默与墙钟时间都不是失败（见 `.teamflow/skills/observer/`）。
 
 ## 模型配置
 

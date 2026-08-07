@@ -2,7 +2,7 @@
 
 Before this change a failure receipt lived in the child's final assistant
 text: untyped, unvalidated, and free to decay into prose that both the
-planner and the outer loop then paid tokens to interpret. Delegation now
+planner and the observe loop then paid tokens to interpret. Delegation now
 materializes a handoff directory, the child writes its receipt through the
 CLI (which validates it), and the tool's return value degrades to a pointer
 so the receipt body never enters the delegator's context.

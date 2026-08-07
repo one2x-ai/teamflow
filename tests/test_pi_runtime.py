@@ -1,6 +1,6 @@
-"""Requirement tests for the Pi inner-loop runtime migration.
+"""Requirement tests for the Pi execute-loop runtime migration.
 
-These tests assert the invariants of run-id ``pi-inner-loop-runtime``:
+These tests assert the invariants of run-id ``pi-execute-loop-runtime``:
 OpenCode is removed from every active runtime path and
 ``@earendil-works/pi-coding-agent`` is the installed, checked, and
 configured runtime. Provider and credential policy is verified through

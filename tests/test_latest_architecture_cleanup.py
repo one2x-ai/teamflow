@@ -6,7 +6,7 @@ They are written BEFORE the cleanup and are expected to be RED until:
   A) No OpenCode runtime claims and no WORKFLOW_*/OPENCODE_WORKFLOW_* fallback
      remain in active source/docs/scripts; init/bootstrap/setup carry no legacy
      .opencode/.workflow migration, aliases, or tombstones.
-  B) skills/outer-loop-monitor is removed; AGENTS.md and README.md describe only
+  B) skills/observe-loop-monitor is removed; AGENTS.md and README.md describe only
      metadata-only process + phase + artifact observation with no session-file
      access.
   E) The experiments tooling remains installed and checked.
@@ -108,7 +108,7 @@ class ActiveDocsHaveNoOpenCodeOrLegacyFallbackTests(unittest.TestCase):
     once claimed OpenCode was the agent runtime. Pi is the runtime, and that
     claim must stay gone.
 
-    opencode is now something different: the outer loop that `teamflow
+    opencode is now something different: the observe loop that `teamflow
     server` connects to as an upstream API. Naming it in that role is
     correct, so the guard targets the false runtime claims and the legacy
     config surface instead of the bare word.
@@ -116,7 +116,7 @@ class ActiveDocsHaveNoOpenCodeOrLegacyFallbackTests(unittest.TestCase):
 
     # Phrasings that would reinstate the retired claim, or point at the
     # legacy per-project OpenCode config that no longer exists. Naming
-    # opencode as the upstream outer loop is correct and not listed here.
+    # opencode as the upstream observe loop is correct and not listed here.
     FORBIDDEN_RUNTIME_CLAIMS = (
         "opencode runtime",
         "opencode agent runtime",
@@ -146,7 +146,7 @@ class ActiveDocsHaveNoOpenCodeOrLegacyFallbackTests(unittest.TestCase):
         """The positive half: README must still name Pi as the runtime.
 
         Only README is checked. AGENTS.md defines roles, sequence, and
-        engineering rules for the outer loop; naming the runtime is not its
+        engineering rules for the observe loop; naming the runtime is not its
         job, so requiring it there would be a false contract.
         """
         self.assertRegex(
@@ -162,14 +162,14 @@ class ActiveDocsHaveNoOpenCodeOrLegacyFallbackTests(unittest.TestCase):
         self._assert_clean_docs(read(AGENTS_MD), "AGENTS.md")
 
 
-class OuterLoopMonitorRemovedFromDocsTests(unittest.TestCase):
+class ObserveLoopMonitorRemovedFromDocsTests(unittest.TestCase):
     """B: docs describe metadata-only observation; no monitor/session-file access."""
 
-    def test_readme_and_agents_drop_outer_loop_monitor(self):
+    def test_readme_and_agents_drop_observe_loop_monitor(self):
         for path, label in ((README_MD, "README.md"), (AGENTS_MD, "AGENTS.md")):
             source = read(path)
             with self.subTest(doc=label):
-                self.assertNotIn("outer-loop-monitor", source)
+                self.assertNotIn("observe-loop-monitor", source)
                 self.assertNotIn("opencode.db", source)
 
     def test_docs_keep_metadata_only_event_observation(self):
@@ -302,7 +302,7 @@ class InstallerDoctorFootprintTests(unittest.TestCase):
     """G: installer/doctor/docs reflect only the current footprint."""
 
     def test_installer_does_not_install_removed_monitor(self):
-        self.assertNotIn("outer-loop-monitor", read(INIT_PROJECT))
+        self.assertNotIn("observe-loop-monitor", read(INIT_PROJECT))
 
     def test_readme_layout_reflects_current_footprint(self):
         source = read(README_MD)

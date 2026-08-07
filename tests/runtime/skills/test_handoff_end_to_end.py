@@ -7,7 +7,7 @@ compose into the story the design describes, driving only the real CLIs:
     -> agents list -> teamflow wait increment -> root finish -> run_finished
 
 It is deliberately provider-free: everything asserted here is mechanical, so
-it runs anywhere and pins the observable surface an outer loop depends on.
+it runs anywhere and pins the observable surface an observe loop depends on.
 
 All paths are relative to the repository root
 ``ROOT = Path(__file__).resolve().parents[3]``.
@@ -29,7 +29,7 @@ RUN_ID = "run-20260101-000000-e2e0"
 
 ROOT_BODY = """- Goal: prove the coordination surface composes.
 - Scope: .teamflow/skills/write-handoff/scripts/handoff_state.py
-- Acceptance: 1. the outer loop sees run_finished.
+- Acceptance: 1. the observe loop sees run_finished.
 """
 
 CHILD_BODY = """- Goal: run the focused test command.
@@ -86,7 +86,7 @@ class HandoffEndToEndTests(unittest.TestCase):
         return json.loads(completed.stdout)
 
     def test_full_run_is_observable_from_metadata_alone(self):
-        # The run announces itself, so the outer loop never guesses by mtime.
+        # The run announces itself, so the observe loop never guesses by mtime.
         self.handoff("run-start", "--role", "planner", "--pid", str(os.getpid()))
 
         root = json.loads(
@@ -149,7 +149,7 @@ class HandoffEndToEndTests(unittest.TestCase):
             "--receipt", str(receipt), "--summary", "focused test is red as expected",
         )
 
-        # The outer loop learns the child's outcome from the file name alone.
+        # The observe loop learns the child's outcome from the file name alone.
         increment = self.wait(since=watermark)
         self.assertEqual(
             [(event["kind"], event["status"]) for event in increment["events"]],
@@ -184,7 +184,7 @@ class HandoffEndToEndTests(unittest.TestCase):
         self.assertEqual(
             [(event["kind"], event["status"]) for event in final["events"]],
             [("handoff_finished", "PASS"), ("run_finished", "PASS")],
-            "the root handoff closing the run is what ends the outer loop's watch",
+            "the root handoff closing the run is what ends the observe loop's watch",
         )
 
         spool = sorted(

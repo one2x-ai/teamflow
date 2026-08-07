@@ -157,7 +157,7 @@ class RoleProviderModelCoverageTests(unittest.TestCase):
     """AC 2: every agent Markdown model resolves through models.json."""
 
     # Independent floor so coverage does not silently collapse: the four
-    # providers backing the active inner-loop and memory roles.
+    # providers backing the active execute-loop and memory roles.
     MINIMUM_COVERAGE = {
         "zhipuai-coding-plan": "glm-5.2",
         "deepseek": "deepseek-v4-pro",
@@ -190,7 +190,7 @@ class RoleProviderModelCoverageTests(unittest.TestCase):
                     f"agent {agent_path.name} model {model_id!r} missing from provider {provider_id!r}",
                 )
 
-    def test_minimum_inner_loop_coverage_present(self):
+    def test_minimum_execute_loop_coverage_present(self):
         self.assertTrue(MODELS_PATH.is_file(), ".teamflow/models.json must exist")
         providers = _load_models().get("providers", {})
         for provider_id, model_id in self.MINIMUM_COVERAGE.items():

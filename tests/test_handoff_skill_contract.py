@@ -1,9 +1,9 @@
-"""Requirement tests for the write-handoff skill, observe-inner-loop rewrite,
+"""Requirement tests for the write-handoff skill, observer rewrite,
 de-duplication, and discoverability (Parts B–E).
 
 These tests assert the *desired end state* and must currently FAIL RED because
 ``write-handoff`` does not exist yet, the de-duplication has not happened, and
-the observe-inner-loop skill has not been rewritten with a liveness-first probe.
+the observer skill has not been rewritten with a liveness-first probe.
 """
 
 import os
@@ -15,7 +15,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 WRITE_HANDOFF = ROOT / ".teamflow" / "skills" / "write-handoff" / "SKILL.md"
-OBSERVE_SKILL = ROOT / ".teamflow" / "skills" / "observe-inner-loop" / "SKILL.md"
+OBSERVE_SKILL = ROOT / ".teamflow" / "skills" / "observer" / "SKILL.md"
 REPO_AGENTS = ROOT / "AGENTS.md"
 SHARED_AGENTS = ROOT / ".teamflow" / "AGENTS.md"
 PLAN_CHANGE = ROOT / ".teamflow" / "skills" / "plan-change" / "SKILL.md"
@@ -228,21 +228,21 @@ class DiscoverabilityTests(unittest.TestCase):
             )
             output = proc.stdout.decode("utf-8", "replace")
             self.assertIn("write-handoff", output)
-            self.assertIn("observe-inner-loop", output)
+            self.assertIn("observer", output)
 
 
 # ---------------------------------------------------------------------------
-# Part B — observe-inner-loop: one blocking call, no ladder
+# Part B — observer: one blocking call, no ladder
 # ---------------------------------------------------------------------------
 
-class ObserveInnerLoopContractTests(unittest.TestCase):
+class ObserveExecuteLoopContractTests(unittest.TestCase):
     """Observation is a single blocking wait, and the skill must say so."""
 
     def test_skill_under_3000_bytes(self):
         size = len(read(OBSERVE_SKILL).encode("utf-8"))
         self.assertLess(
             size, 3000,
-            f"observe-inner-loop SKILL.md must stay under 3000 bytes, got {size}",
+            f"observer SKILL.md must stay under 3000 bytes, got {size}",
         )
 
     def test_leads_with_the_blocking_listener(self):
@@ -275,7 +275,7 @@ class ObserveInnerLoopContractTests(unittest.TestCase):
         self.assertRegex(
             text,
             r"costs? (you )?nothing|zero",
-            "the skill must state that an unchanged inner loop costs nothing",
+            "the skill must state that an unchanged execute loop costs nothing",
         )
 
 

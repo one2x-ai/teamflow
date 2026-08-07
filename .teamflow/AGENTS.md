@@ -60,16 +60,16 @@ A delegated `PASS` or `FAIL` requires a validated receipt file: `teamflow handof
 - A delegated response ending with `finish=length` is output truncation, not a successful empty handoff. When its mandatory artifact is absent the delegation is recorded `BLOCKED` with both the truncation and missing-artifact reasons; do not silently retry inside the same handoff.
 - Run `teamflow source-check` after implementation edits and before test execution.
 
-## Outer loop observation
+## Observe loop observation
 
-An outer coordinator that watches this inner loop must load `observe-inner-loop` and observe metadata only. It is not doing the work, so it must not pay for the inner loop's context.
+An outer coordinator that watches this execute loop must load `observer` and observe metadata only. It is not doing the work, so it must not pay for the execute loop's context.
 
-- Observe with one blocking call: `teamflow wait --run-id <id> --since <seq>`. It returns when events arrive or the timeout expires, so an unchanged inner loop costs nothing and there is no polling interval to tune. Omit `--run-id` to discover runs from the shared spool.
+- Observe with one blocking call: `teamflow wait --run-id <id> --since <seq>`. It returns when events arrive or the timeout expires, so an unchanged execute loop costs nothing and there is no polling interval to tune. Omit `--run-id` to discover runs from the shared spool.
 - Escalate only on a status that warrants it: `teamflow handoff status --run-id <id> [--id <handoff-id>]` for one receipt or every active handoff, and `teamflow agents list` for who is doing what.
 - Confirm progress by testing existence and non-emptiness of expected paths under `.teamflow/runs/`; do not read artifact bodies.
 - Never read session files, prompts, reasoning, model responses, raw provider errors, configuration, or credentials.
 - There are exactly two stop signals: a handoff finished `BLOCKED`, and `runner_exited` arriving while the last business event is not terminal. Only the depth-0 main runner's exit emits `runner_exited`; auxiliary/short-lived agents (e.g. title-compressor) do not produce a stop signal. A running handoff reporting `stale: true` past `TEAMFLOW_HANDOFF_TIMEOUT_SECONDS` is an age, not a failure.
-- Terminal silence and elapsed wall time alone are never failure evidence and must not terminate the inner loop.
+- Terminal silence and elapsed wall time alone are never failure evidence and must not terminate the execute loop.
 
 ## Shared memory
 

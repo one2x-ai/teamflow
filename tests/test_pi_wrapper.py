@@ -1,4 +1,4 @@
-"""Requirement tests for run-id ``pi-inner-loop-wrapper``.
+"""Requirement tests for run-id ``pi-execute-loop-wrapper``.
 
 These tests pin the contract of the Pi-integration wrapper: a functional
 ``teamflow`` wrapper that maps roles to real ``pi`` arguments, resolves role

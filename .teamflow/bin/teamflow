@@ -73,7 +73,12 @@ fi
 
 if [[ "${1:-}" == "wait" ]]; then
   shift
-  exec python3 "$RUNTIME_DIR/skills/observe-inner-loop/scripts/wait.py" "$@"
+  exec python3 "$RUNTIME_DIR/skills/observer/scripts/wait.py" "$@"
+fi
+
+if [[ "${1:-}" == "agent-status" ]]; then
+  shift
+  exec python3 "$RUNTIME_DIR/bin/agent-status" "$@"
 fi
 
 # Transitional alias: `phase` keeps working for one version while agent
@@ -95,7 +100,7 @@ fi
 
 if [[ "${1:-}" == "probe" ]]; then
   shift
-  exec python3 "$RUNTIME_DIR/skills/observe-inner-loop/scripts/probe.py" "$@"
+  exec python3 "$RUNTIME_DIR/skills/observer/scripts/probe.py" "$@"
 fi
 
 if [[ "${1:-}" == "command" ]]; then

@@ -12,7 +12,8 @@ usage() {
 Usage: ./scripts/install.sh [--dry-run] [--force] <target-project>
 
 Install or update the current Teamflow runtime in an existing Git project.
-Managed files stay below .teamflow/; the only root change is .gitignore.
+Managed files stay below .teamflow/; the only root changes are .gitignore and
+an entry-point bridge in AGENTS.md.
 EOF
 }
 
@@ -54,6 +55,7 @@ FILES=(
   ".teamflow/bin/memory-capture"
   ".teamflow/bin/test-patch"
   ".teamflow/bin/server"
+  ".teamflow/bin/agent-status"
   ".teamflow/extensions/teamflow-task/index.ts"
   ".teamflow/extensions/teamflow-task/handoff-gate.ts"
   ".teamflow/extensions/agent-watchdog/index.ts"
@@ -108,6 +110,7 @@ fi
 if [[ "$DRY_RUN" == true ]]; then
   for relative_path in "${FILES[@]}"; do printf '%s\n' "$relative_path"; done
   printf '%s\n' ".gitignore: ensure .teamflow/"
+  printf '%s\n' "AGENTS.md: ensure teamflow entry-point bridge"
   exit 0
 fi
 
@@ -174,6 +177,7 @@ fi
 chmod +x "$TARGET_ROOT/.teamflow/bin/teamflow" "$TARGET_ROOT/.teamflow/bin/pi-runtime" \
   "$TARGET_ROOT/.teamflow/bin/memory" "$TARGET_ROOT/.teamflow/bin/memory-capture" \
   "$TARGET_ROOT/.teamflow/bin/test-patch" "$TARGET_ROOT/.teamflow/bin/server" \
+  "$TARGET_ROOT/.teamflow/bin/agent-status" \
   "$TARGET_ROOT/.teamflow/experiments/bin/memory-experiment" \
   "$TARGET_ROOT/.teamflow/experiments/bin/memory-compare"
 
@@ -181,6 +185,52 @@ if [[ ! -f "$TARGET_ROOT/.gitignore" ]]; then
   printf '# Local Teamflow runtime\n.teamflow/\n' > "$TARGET_ROOT/.gitignore"
 elif ! grep -qxF '.teamflow/' "$TARGET_ROOT/.gitignore"; then
   printf '\n# Local Teamflow runtime\n.teamflow/\n' >> "$TARGET_ROOT/.gitignore"
+fi
+
+# Root AGENTS.md: bridge external agents that read the repository root to the
+# Teamflow workflow. The bridge leads with the single entry command and a
+# guardrail against reconstructing the orchestration by hand; it does NOT feed
+# the execute-loop contract to external agents (that causes them to hand-author
+# handoffs and call pi-runtime directly). This is a line-level augmentation
+# like .gitignore, never a byte-managed manifest entry, so a project's existing
+# agent rules are always preserved. A bridge section is written only when the
+# entry command is absent.
+AGENTS_MD="$TARGET_ROOT/AGENTS.md"
+if [[ ! -f "$AGENTS_MD" ]]; then
+  cat > "$AGENTS_MD" <<'EOF'
+# Agents
+
+This project runs the Teamflow multi-agent workflow. Start it with one command
+and let the Teamflow runtime own the whole orchestration:
+
+    teamflow run --agent planner "<requirement>"   # headless
+    teamflow                                        # interactive
+
+The runtime spawns its own agents (planner / test-writer / test-runner / coder),
+opens and finishes handoffs, and records run artifacts. As an external agent you
+only start a run and then observe metadata:
+
+    teamflow handoff status --run-id <id>   # receipts for active handoffs
+    teamflow agents list                    # who is doing what
+
+Do NOT reconstruct the workflow by hand: never author handoff files yourself,
+never call `.teamflow/bin/pi-runtime` directly, and never read files under
+`.teamflow/` to reimplement the orchestration. The execute-loop contract at
+[.teamflow/AGENTS.md](.teamflow/AGENTS.md) is for the runtime agents; you do not
+need it to start a run.
+EOF
+elif ! grep -qF 'teamflow run --agent planner' "$AGENTS_MD"; then
+  {
+    printf '\n## Teamflow\n\n'
+    printf 'This project runs the Teamflow multi-agent workflow. Start it with\n'
+    printf '`teamflow run --agent planner "<requirement>"` and let the runtime own\n'
+    printf 'the orchestration; observe via `teamflow handoff status` and\n'
+    printf '`teamflow agents list`. Do NOT reconstruct it by hand: never author\n'
+    printf 'handoff files, never call `.teamflow/bin/pi-runtime` directly, and\n'
+    printf 'never read under `.teamflow/` to reimplement the flow. The execute-loop\n'
+    printf 'contract at [.teamflow/AGENTS.md](.teamflow/AGENTS.md) is for the\n'
+    printf 'runtime agents, not for external agents.\n'
+  } >> "$AGENTS_MD"
 fi
 
 mkdir -p "$(dirname "$MANIFEST_PATH")"

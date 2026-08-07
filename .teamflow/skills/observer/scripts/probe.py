@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Cheap one-line diagnostic for a teamflow run.
 
-This is a manual troubleshooting tool, not part of the outer-loop contract:
+This is a manual troubleshooting tool, not part of the observe-loop contract:
 coordination observation is `teamflow wait`, which blocks instead of polling.
 
 With no arguments it discovers the newest run below the runs directory by
